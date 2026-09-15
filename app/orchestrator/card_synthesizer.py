@@ -311,21 +311,41 @@ class CardSynthesizer:
         if not data:
             return None
         items: List[ListItem] = []
-        contacts = data if isinstance(data, list) else (data.get("items") or data.get("contacts") or [])
+        contacts = data if isinstance(data, list) else (
+            data.get("contents") or data.get("items") or data.get("contacts") or []
+        )
 
         for c in contacts[:4]:
             if isinstance(c, dict):
-                name = c.get("name") or c.get("deptName") or "연락처"
-                phone = c.get("phone") or c.get("tel") or ""
-                office = c.get("office") or c.get("location") or ""
-                role = c.get("role") or c.get("dept") or "교직원"
-                sub = f"📞 {phone} | 🏢 {office}".strip(" |")
+                # College office contact vs individual directory entry
+                dept_name = c.get("departmentName") or c.get("deptName")
+                indiv_name = c.get("name")
+                name = dept_name or indiv_name or "연락처"
+
+                phone = c.get("officePhoneNumber") or c.get("phoneNumber") or c.get("phone") or c.get("tel") or ""
+                location = c.get("officeLocation") or c.get("office") or c.get("location") or ""
+                college = c.get("collegeName")
+                position = c.get("position")
+                detail_aff = c.get("detailAffiliation") or c.get("affiliation")
+
+                tag = (college or position or detail_aff or "연락처")[:8]
+                sub_parts = []
+                if phone:
+                    sub_parts.append(f"📞 {phone}")
+                if location:
+                    sub_parts.append(f"🏢 {location}")
+                if c.get("email"):
+                    sub_parts.append(f"✉️ {c.get('email')}")
+
+                sub = " | ".join(sub_parts) if sub_parts else "연락처 정보"
+                link_target = f"tel:{phone}" if phone else c.get("homepageUrl")
+
                 items.append(
                     ListItem(
                         title=str(name),
                         subtitle=sub,
-                        tag=str(role)[:6],
-                        link=f"tel:{phone}" if phone else None,
+                        tag=str(tag),
+                        link=link_target,
                     )
                 )
 
@@ -335,7 +355,7 @@ class CardSynthesizer:
         return ListCard(
             title="📞 교내 전화번호부 및 연락처",
             items=items,
-            footer_text="전화번호 및 사무실 위치 정보를 확인하세요.",
+            footer_text="전화번호 및 위치 정보를 확인하세요.",
         )
 
     @classmethod

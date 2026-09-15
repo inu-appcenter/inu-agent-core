@@ -190,12 +190,14 @@ class OpenApiConnector:
             return "TIMETABLE"
         if "notice" in p:
             return "NOTICE"
-        if "schedule" in p:
+        if "schedule" in p or "calendar" in p:
             return "SCHEDULE"
         if "reservation" in p:
             return "RESERVATION"
         if "weather" in p:
             return "WEATHER"
+        if "directory" in p or "contact" in p or "department" in p:
+            return "DIRECTORY"
         return "INTIP"
 
     def _check_auth_required(self, op: Dict[str, Any]) -> bool:

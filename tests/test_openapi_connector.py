@@ -52,11 +52,11 @@ def test_tool_pruner():
     assert len(pruned) >= 1
     assert pruned[0].category == "BUS"
 
-    # 3. Timetable Query
-    timetable_query = "오늘 내 수업 시간표 어떻게 돼?"
-    pruned = ToolPruner.prune(timetable_query, tools, client="INTIP", max_tools=2)
+    # 4. Directory Query
+    directory_query = "컴공 과사 전화번호 알려줘"
+    pruned = ToolPruner.prune(directory_query, tools, client="INTIP", max_tools=2)
     assert len(pruned) >= 1
-    assert pruned[0].category == "TIMETABLE"
+    assert pruned[0].category == "DIRECTORY"
 
 
 def test_token_relay_and_execution():

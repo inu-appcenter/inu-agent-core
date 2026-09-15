@@ -136,7 +136,7 @@ class AgentRouter:
                 return {"bstopId": resolved_id}
 
         # For other schema-driven tools, ask LLM to extract arguments conforming to the OpenAPI parameters schema
-        system_msg = f"""당신은 사용자의 질의로부터 API 호출에 필요한 JSON 인자(Arguments)를 정확히 추출하는 AI 파라미터 리졸버입니다.
+        system_msg = f"""당신은 사용자의 질의로부터 OpenAPI REST API 호출에 필요한 JSON 인자(Arguments)를 정확히 추출하는 AI 파라미터 리졸버입니다.
 
 [도구 이름]: {fn.get('name')}
 [도구 설명]: {fn.get('description')}
@@ -144,9 +144,13 @@ class AgentRouter:
 {json.dumps(params_schema, ensure_ascii=False, indent=2)}
 
 규칙:
-1. 사용자 질의에서 언급된 정보를 바탕으로 파라미터 값을 추출하세요.
-2. 질의에 명시되지 않은 선택적 파라미터는 기본값(default)을 사용하거나 생략하세요.
-3. 반드시 오직 유효한 JSON 객체({{ ... }})만 반환하세요.
+1. 사용자 질의에서 언급된 핵심 엔티티와 조건을 파악하여 파라미터 값을 추출하세요.
+2. 학과명, 단과대, 교수명, 부서명 등의 검색어(query) 파라미터 추출 시:
+   - '과사', '사무실', '전화번호', '알려줘', '위치', '번호', '연락처' 같은 질의 수식어는 제거하세요.
+   - 축약어/줄임말(예: '컴공' -> '컴퓨터공학', '임베' -> '임베디드', '정통' -> '정보통신', '전전' -> '전자공학', '산경' -> '산업경영', '패디' -> '패션산업', '미컴' -> '미디어커뮤니케이션', '사복' -> '사회복지', '생공' -> '생명공학' 등)은 대학 포털 DB에서 검색될 수 있는 정규 학과/부서 키워드로 정규화하세요.
+3. 식당(cafeteria) 파라미터는 학생식당, 제1기숙사식당, 2기숙사 식당, 27호관식당, 사범대식당 중 가장 일치하는 명칭으로 추출하세요.
+4. 질의에 명시되지 않은 선택적 파라미터는 기본값(default)을 사용하거나 생략하세요.
+5. 반드시 오직 유효한 JSON 객체({{ ... }})만 반환하세요.
 """
         messages = [
             {"role": "system", "content": system_msg},
