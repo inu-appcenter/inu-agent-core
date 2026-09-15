@@ -8,7 +8,11 @@ import json
 from app.core.logging import logger
 from app.llm.client import llm_client
 from app.llm.schemas import ChatRequest, AgentStreamEvent
-from app.orchestrator.prompts import get_system_prompt_for_client
+from app.orchestrator.prompts import (
+    get_system_prompt_for_client,
+    is_out_of_scope_question,
+    OUT_OF_SCOPE_REFUSAL_MESSAGE,
+)
 from app.orchestrator.pruner import ToolPruner
 from app.tools.registry import tool_registry
 
@@ -18,6 +22,13 @@ class AgentOrchestrator:
         """
         Execute streaming chat with intent handling, tool pruning, and SSE events.
         """
+        # 0. Out-of-scope hard guardrail (Coding, pure math, unrelated universities)
+        if is_out_of_scope_question(request.message):
+            logger.info(f"Out-of-scope question detected: '{request.message[:30]}...' -> streaming refusal.")
+            yield AgentStreamEvent(event_type="TOKEN", content=OUT_OF_SCOPE_REFUSAL_MESSAGE)
+            yield AgentStreamEvent(event_type="DONE")
+            return
+
         system_prompt = get_system_prompt_for_client(request.client)
 
         # 1. Tool Pruning: select top 3-4 most relevant tools from registry
