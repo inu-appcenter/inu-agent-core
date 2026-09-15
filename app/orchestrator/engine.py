@@ -14,6 +14,7 @@ from app.orchestrator.prompts import (
     OUT_OF_SCOPE_REFUSAL_MESSAGE,
 )
 from app.orchestrator.pruner import ToolPruner
+from app.orchestrator.card_synthesizer import CardSynthesizer
 from app.tools.registry import tool_registry
 
 
@@ -45,9 +46,9 @@ class AgentOrchestrator:
         }
 
         tool_summary_text = ""
-        emitted_client_action = False
+        emitted_cards = set()
 
-        # 2. Execute tools if matched
+        # 2. Execute tools if matched and synthesize SDUI cards
         for tool in pruned_tools:
             # Case A: Client Action (LMS, Portal ERP, Library P2P) -> Emit instruction
             if tool.category in ["LMS", "PORTAL", "LIBRARY"]:
@@ -56,19 +57,33 @@ class AgentOrchestrator:
                     if hasattr(action_instruction, "action_id"):
                         logger.info(f"Emitting ClientActionInstruction: {action_instruction.action_id} ({action_instruction.auth_domain})")
                         yield AgentStreamEvent(event_type="ACTION_REQUIRED", action=action_instruction)
-                        emitted_client_action = True
                 except Exception as ex:
                     logger.warning(f"Failed to generate client action for tool {tool.name}: {ex}")
 
             # Case B: Server OpenAPI Tool (Cafeteria, Bus, Timetable, Notices)
             elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE"]:
+                tool_data = None
                 try:
                     res = await tool.execute({}, exec_context)
-                    if res.success and res.data:
+                    if isinstance(res, dict) and res.get("success") and res.get("data"):
+                        tool_data = res.get("data")
                         logger.info(f"Successfully executed OpenApiTool: {tool.name}")
-                        tool_summary_text += f"\n[{tool.name} 조회 결과]:\n{json.dumps(res.data, ensure_ascii=False)[:1000]}\n"
+                        tool_summary_text += f"\n[{tool.name} 조회 결과]:\n{json.dumps(res.get('data'), ensure_ascii=False)[:1000]}\n"
                 except Exception as ex:
                     logger.warning(f"Error executing OpenAPI tool {tool.name}: {ex}")
+
+                # Synthesize and emit SDUI card for domain
+                if tool.category not in emitted_cards:
+                    card = CardSynthesizer.synthesize_for_domain(
+                        domain=tool.category,
+                        tool_name=tool.name,
+                        data=tool_data,
+                        query=request.message,
+                    )
+                    if card:
+                        logger.info(f"Emitting SDUI Card for domain: {tool.category}")
+                        yield AgentStreamEvent(event_type="CARD", card=card)
+                        emitted_cards.add(tool.category)
 
         # 3. Build System Prompt with Grounding Data
         system_prompt = get_system_prompt_for_client(request.client, tool_summary=tool_summary_text)

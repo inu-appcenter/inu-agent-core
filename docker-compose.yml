@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   agent-core:
+    image: ${DOCKERHUB_USERNAME:-inuappcenter}/${PROJECT_NAME:-inu-agent-core}:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
