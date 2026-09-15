@@ -15,6 +15,7 @@ from app.orchestrator.prompts import (
 )
 from app.orchestrator.pruner import ToolPruner
 from app.orchestrator.card_synthesizer import CardSynthesizer
+from app.orchestrator.resolver import ToolParameterResolver
 from app.tools.registry import tool_registry
 
 
@@ -95,15 +96,22 @@ class AgentOrchestrator:
                             f"- [응답 지침]: 현재 연동된 과제/강좌 정보가 없으므로, 실시간 과제 마감과 강의 진도를 확인하려면 사이버캠퍼스(LMS) 계정 연동(INTIP 앱 지원)이 필요함을 친절히 안내하십시오.\n"
                         )
 
-            # Case B: Server OpenAPI Tool (Cafeteria, Bus, Timetable, Notices)
+            # Case B: Server OpenAPI Tool (Cafeteria, Bus, Timetable, Notices, Schedule)
             elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE"]:
                 tool_data = None
+                tool_args = ToolParameterResolver.resolve_arguments(
+                    tool_name=tool.name,
+                    category=tool.category,
+                    query=request.message,
+                )
                 try:
-                    res = await tool.execute({}, exec_context)
-                    if isinstance(res, dict) and res.get("success") and res.get("data"):
-                        tool_data = res.get("data")
-                        logger.info(f"Successfully executed OpenApiTool: {tool.name}")
-                        tool_summary_text += f"\n[{tool.name} 조회 결과]:\n{json.dumps(res.get('data'), ensure_ascii=False)[:1000]}\n"
+                    res = await tool.execute(tool_args, exec_context)
+                    if res is not None and not (isinstance(res, dict) and "error" in res):
+                        tool_data = res
+                        logger.info(f"Successfully executed OpenApiTool: {tool.name} with args {tool_args}")
+                        tool_summary_text += f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
+                    else:
+                        logger.warning(f"OpenApiTool {tool.name} returned error or empty: {res}")
                 except Exception as ex:
                     logger.warning(f"Error executing OpenAPI tool {tool.name}: {ex}")
 
