@@ -40,6 +40,8 @@ class CardSynthesizer:
             return cls._build_notice_card(data)
         elif domain == "SCHEDULE":
             return cls._build_schedule_card(data)
+        elif domain == "LMS":
+            return cls._build_lms_card(data)
         elif domain in ["INU_AI_KNOWLEDGE", "INU_AI", "CITATION"]:
             return cls._build_inuchat_citation_card(data)
 
@@ -249,9 +251,55 @@ class CardSynthesizer:
         if not items:
             return None
 
+    @classmethod
+    def _build_lms_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+        if not data:
+            return None
+        items: List[ListItem] = []
+        events = []
+        courses = []
+        if isinstance(data, dict):
+            events = data.get("events") or data.get("assignments") or []
+            courses = data.get("courses") or []
+        elif isinstance(data, list):
+            events = data
+
+        for ev in events[:5]:
+            if isinstance(ev, dict):
+                ev_name = ev.get("name") or ev.get("title") or "과제"
+                course_info = ev.get("course")
+                c_name = course_info.get("fullname") if isinstance(course_info, dict) else str(course_info or "")
+                due = ev.get("timedue") or ev.get("dueDate") or ev.get("date") or "마감 예정"
+                sub = f"{c_name} · {due}" if c_name else str(due)
+                items.append(
+                    ListItem(
+                        title=str(ev_name),
+                        subtitle=sub,
+                        tag="과제",
+                        link="https://lms.inu.ac.kr",
+                    )
+                )
+
+        if not items and courses:
+            for c in courses[:5]:
+                if isinstance(c, dict):
+                    c_name = c.get("fullname") or c.get("name") or "수강 강좌"
+                    items.append(
+                        ListItem(
+                            title=str(c_name),
+                            subtitle="현재 수강 중인 강좌",
+                            tag="강좌",
+                            link="https://lms.inu.ac.kr",
+                        )
+                    )
+
+        if not items:
+            return None
+
         return ListCard(
-            title="📅 주요 학사일정",
+            title="📝 사이버캠퍼스(LMS) 과제 및 일정",
             items=items,
-            footer_text="일정은 학사 운영 상황에 따라 변경될 수 있습니다.",
+            footer_text="과제 제출 및 온라인 강의 수강은 사이버캠퍼스에서 진행할 수 있습니다.",
         )
+
 
