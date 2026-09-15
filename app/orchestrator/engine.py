@@ -85,6 +85,30 @@ class AgentOrchestrator:
                         yield AgentStreamEvent(event_type="CARD", card=card)
                         emitted_cards.add(tool.category)
 
+            # Case C: INUChat Official Knowledge RAG Tool (Academic Regulations, Graduation, Policies)
+            elif tool.category == "INU_AI_KNOWLEDGE":
+                try:
+                    res = await tool.execute({"question": request.message}, exec_context)
+                    if isinstance(res, dict) and res.get("success") and res.get("data"):
+                        rag_data = res.get("data")
+                        rag_answer = rag_data.get("rag_answer", "")
+                        logger.info(f"Successfully retrieved INUChat RAG Knowledge (len: {len(rag_answer)})")
+                        tool_summary_text += f"\n[인천대학교 공식 학칙/규정 지식베이스 (INUChat RAG 검색 결과)]:\n{rag_answer}\n"
+
+                        if "INU_AI_KNOWLEDGE" not in emitted_cards:
+                            card = CardSynthesizer.synthesize_for_domain(
+                                domain="INU_AI_KNOWLEDGE",
+                                tool_name=tool.name,
+                                data=rag_data,
+                                query=request.message,
+                            )
+                            if card:
+                                logger.info("Emitting SDUI Card for INUChat Citations")
+                                yield AgentStreamEvent(event_type="CARD", card=card)
+                                emitted_cards.add("INU_AI_KNOWLEDGE")
+                except Exception as ex:
+                    logger.warning(f"Error executing INUChat tool {tool.name}: {ex}")
+
         # 3. Build System Prompt with Grounding Data
         system_prompt = get_system_prompt_for_client(request.client, tool_summary=tool_summary_text)
 

@@ -40,6 +40,8 @@ class CardSynthesizer:
             return cls._build_notice_card(data)
         elif domain == "SCHEDULE":
             return cls._build_schedule_card(data)
+        elif domain in ["INU_AI_KNOWLEDGE", "INU_AI", "CITATION"]:
+            return cls._build_inuchat_citation_card(data)
 
         return None
 
@@ -79,17 +81,17 @@ class CardSynthesizer:
         if not items:
             items = [
                 ListItem(
-                    title="송도 캠퍼스 ↔ 인천대입구역 (순환)",
+                    title="송도 캠퍼스 ↔ 인천대입구역 (순환 셔틀)",
                     subtitle="현재 정문 출발 · 약 4분 후 인천대입구역 도착",
                     tag="운행중",
                 ),
                 ListItem(
-                    title="송도 캠퍼스 ↔ 인천역 (직행)",
-                    subtitle="공학관 정류장 대기중 · 10분 간격 운행",
+                    title="송도 캠퍼스 ↔ 지식정보단지역 셔틀",
+                    subtitle="공과대학 정류장 통과 · 약 5분 후 도착",
                     tag="운행중",
                 ),
                 ListItem(
-                    title="송도 8공구 통학 셔틀",
+                    title="송도 캠퍼스 ↔ 미추홀 캠퍼스 셔틀",
                     subtitle="다음 배차: 15분 후 출발",
                     tag="배차 대기",
                 ),
@@ -99,6 +101,49 @@ class CardSynthesizer:
             title="🚌 실시간 송도 캠퍼스 셔틀버스 운행 현황",
             items=items,
             footer_text="실시간 도로 교통 상황에 따라 1~2분 정도 차이가 날 수 있습니다.",
+        )
+
+    @classmethod
+    def _build_inuchat_citation_card(cls, data: Optional[Any] = None) -> ListCard:
+        items: List[ListItem] = []
+        citations = []
+        if isinstance(data, dict):
+            citations = data.get("citations") or []
+
+        for cit in citations[:4]:
+            if isinstance(cit, dict):
+                title = cit.get("title", "관련 학칙/원문 바로가기")
+                url = cit.get("url", "https://www.inu.ac.kr")
+                tag = "공식학칙" if cit.get("type") == "LAW" else "공지출처"
+                items.append(
+                    ListItem(
+                        title=title,
+                        subtitle=url,
+                        tag=tag,
+                        link=url,
+                    )
+                )
+
+        if not items:
+            items = [
+                ListItem(
+                    title="인천대학교 학칙 및 학사 규정",
+                    subtitle="https://www.inu.ac.kr/inu/1560/subview.do",
+                    tag="공식학칙",
+                    link="https://www.inu.ac.kr/inu/1560/subview.do",
+                ),
+                ListItem(
+                    title="인천대학교 포털 학사 공지사항",
+                    subtitle="https://www.inu.ac.kr/inu/666/subview.do",
+                    tag="공지원문",
+                    link="https://www.inu.ac.kr/inu/666/subview.do",
+                ),
+            ]
+
+        return ListCard(
+            title="📜 INUChat 학사 지식베이스 공식 출처 (Citations)",
+            items=items,
+            footer_text="인천대학교 공식 규정집 및 학사 공지 원문을 기반으로 검증되었습니다.",
         )
 
     @classmethod

@@ -14,13 +14,27 @@ from app.core.logging import logger
 
 class InuAiKnowledgeTool(BaseTool):
     def __init__(self, base_url: Optional[str] = None):
-        super().__init__(
-            name="inuai_knowledge_search",
-            description="인천대학교 공식 학칙, 학사 규정, 졸업 요건, 복수전공/부전공/전과 기준, 휴학/복학/학사경고, 장학금 규정 및 상세 공지사항 RAG 검색",
-            category="INU_AI_KNOWLEDGE",
-        )
+        self.name = "inuai_knowledge_search"
+        self.description = "인천대학교 공식 학칙, 학사 규정, 졸업 요건, 복수전공/부전공/전과 기준, 휴학/복학/학사경고, 장학금 규정 및 상세 공지사항 RAG 검색"
+        self.category = "INU_AI_KNOWLEDGE"
         self.base_url = base_url or settings.INUCHAT_BASE_URL
         self.endpoint = f"{self.base_url.rstrip('/')}/inuchat/chat"
+
+    def get_schema(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "인천대학교 학칙, 졸업요건, 규정, 공지사항 관련 질문 내용",
+                    }
+                },
+                "required": ["question"],
+            },
+        }
 
     async def execute(self, params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         question = params.get("question") or (context or {}).get("query") or ""
