@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  agent-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inu-agent-core
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=agent-redis
+      - REDIS_PORT=6379
+    depends_on:
+      - agent-redis
+    networks:
+      - agent-network
+
+  agent-redis:
+    image: redis:7-alpine
+    container_name: inu-agent-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - agent-network
+
+networks:
+  agent-network:
+    driver: bridge
+
+volumes:
+  redis-data:
