@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     # Internal Service Endpoints
     INU_PORTAL_SERVER_URL: str = "http://localhost:8080"
+    INUCHAT_BASE_URL: str = "https://ai-server.inuappcenter.kr"
     INU_INTERNAL_S2S_SECRET: str = Field(
         default="",
         description="Shared secret for internal service-to-service communication",

@@ -13,6 +13,9 @@ from app.tools.action_tool import ClientActionTool
 from app.rules.registry import action_rule_registry
 
 
+from app.tools.inuchat import InuAiKnowledgeTool
+
+
 class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, BaseTool] = {}
@@ -65,8 +68,12 @@ class ToolRegistry:
         return len(parsed_tools)
 
     async def initialize_all_tools(self) -> None:
-        """Initialize both internal OpenAPI tools and external Client Action tools."""
+        """Initialize internal OpenAPI tools, INUChat RAG knowledge tool, and external Client Action tools."""
+        # 1. Register InuChat Knowledge Tool
+        self.register(InuAiKnowledgeTool())
+        # 2. Register Client Action Tools
         self.register_client_action_rules()
+        # 3. Register OpenAPI Tools
         await self.sync_inu_portal_tools()
 
 

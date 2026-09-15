@@ -85,3 +85,29 @@ pytest tests
 ```bash
 docker-compose up -d --build
 ```
+
+---
+
+## 🚢 CI/CD 및 배포 (GitHub Actions)
+
+`inu-agent-core`는 GitHub Actions를 통해 Docker Hub 빌드 및 학교 서버 원격 자동 배포(SSH/SCP)를 지원합니다.
+
+* **운영 배포 (`cicd-prod.yml`)**: `main` 브랜치에 코드가 푸시되거나 수동 트리거(`workflow_dispatch`) 시 실행됩니다.
+* **개발 배포 (`cicd-dev.yml`)**: `develop` / `dev` 브랜치에 코드가 푸시되거나 수동 트리거 시 실행됩니다.
+
+### 필요 GitHub Secrets 설정
+GitHub Repository의 **Settings > Secrets and variables > Actions**에 아래 시크릿을 등록합니다:
+
+| 분류 | Secret Key | 설명 |
+| :--- | :--- | :--- |
+| **DockerHub** | `USERNAME` | Docker Hub 계정명 / Organization 이름 |
+| | `TOKEN` | Docker Hub Access Token |
+| | `PROJECT_NAME` | 이미지 레포지토리 명 (`inu-agent-core`) |
+| **Server SSH** | `HOST_ADDRESS` | 학교 대상 서버 IP 주소 또는 도메인 |
+| | `SERVER_USERNAME` | 서버 SSH 접속 계정명 (예: `ubuntu`) |
+| | `SERVER_KEY` | SSH 접속용 Private Key (`id_rsa` / `id_ed25519`) |
+| | `SERVER_PORT` | SSH 포트 번호 (기본: `22`) |
+| | `MOUNT_PATH` | 서버 내 배포 디렉토리 경로 (예: `/home/ubuntu/apps/inu-agent-core`) |
+| **App ENV** | `ENV_PROD` | 운영 환경용 `.env` 파일 내용 전체 |
+| | `ENV_DEV` | *(선택)* 개발 환경용 `.env` 파일 내용 전체 |
+
