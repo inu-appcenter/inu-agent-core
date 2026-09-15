@@ -104,12 +104,45 @@ class AgentOrchestrator:
                     query=request.message,
                     history=request.history,
                 )
+                bus_meta = tool_args.pop("_meta", None) if tool.category == "BUS" else None
+
                 try:
                     res = await tool.execute(tool_args, exec_context)
                     if res is not None and not (isinstance(res, dict) and "error" in res):
-                        tool_data = res
-                        logger.info(f"Successfully executed OpenApiTool: {tool.name} with dynamic args {tool_args}")
-                        tool_summary_text += f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
+                        if tool.category == "BUS" and bus_meta:
+                            valid_routes = bus_meta.get("validRoutes", [])
+                            stop_name = bus_meta.get("stopName", "정류소")
+                            tab_name = bus_meta.get("tabName", "인입런")
+                            raw_list = res if isinstance(res, list) else res.get("items", [])
+                            filtered_arrivals = [
+                                item for item in raw_list
+                                if isinstance(item, dict) and item.get("routeNo") in valid_routes
+                            ] if valid_routes else raw_list
+
+                            tool_data = {
+                                "arrivals": filtered_arrivals,
+                                "validRoutes": valid_routes,
+                                "stopName": stop_name,
+                                "tabName": tab_name,
+                            }
+                            logger.info(f"Bus arrivals filtered by INTIP routes ({valid_routes}): {len(filtered_arrivals)}/{len(raw_list)} items")
+                            if filtered_arrivals:
+                                tool_summary_text += (
+                                    f"\n[BUS 실시간 도착 정보 ({tab_name} - {stop_name})]:\n"
+                                    f"- 인팁(INTIP) 서비스 대상 모니터링 노선: {', '.join(valid_routes)}\n"
+                                    f"- 실시간 도착 예정 버스:\n{json.dumps(filtered_arrivals, ensure_ascii=False)}\n"
+                                )
+                            else:
+                                tool_summary_text += (
+                                    f"\n[BUS 실시간 도착 정보 ({tab_name} - {stop_name})]:\n"
+                                    f"- 인팁(INTIP) 서비스 대상 모니터링 노선: {', '.join(valid_routes)}\n"
+                                    f"- 현재 해당 정류소에 운행 대기 중이거나 도착 예정인 인팁 서비스 대상 버스({', '.join(valid_routes)})가 없습니다.\n"
+                                    f"- [엄격 지침]: 인팁 프론트엔드에서 공식 서비스하지 않는 일반 시내/광역 버스(예: M6464 등)는 절대로 답변에 언급하지 마십시오. 서비스 대상 노선({', '.join(valid_routes)}) 중 현재 도착 정보가 없음을 사실대로 친절히 안내하세요.\n"
+                                )
+                        else:
+                            tool_data = res
+                            logger.info(f"Successfully executed OpenApiTool: {tool.name} with dynamic args {tool_args}")
+                            tool_summary_text += f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
                     else:
                         logger.warning(f"OpenApiTool {tool.name} returned error or empty: {res}")
                 except Exception as ex:

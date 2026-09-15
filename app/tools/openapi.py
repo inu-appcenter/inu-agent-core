@@ -182,21 +182,21 @@ class OpenApiConnector:
 
     def _infer_category(self, path: str, tags: List[str]) -> str:
         p = path.lower()
-        if "cafeteria" in p:
+        if "/cafeteria" in p:
             return "CAFETERIA"
-        if "bus" in p:
+        if "/bus" in p or "buses" in p or "shuttle" in p:
             return "BUS"
-        if "timetable" in p:
+        if "/timetable" in p or "syllabus" in p:
             return "TIMETABLE"
-        if "notice" in p:
+        if "/notice" in p or "councilnotice" in p:
             return "NOTICE"
-        if "schedule" in p or "calendar" in p:
+        if "/schedule" in p or "/calendar" in p or "/semester" in p:
             return "SCHEDULE"
-        if "reservation" in p:
+        if "/reservation" in p:
             return "RESERVATION"
-        if "weather" in p:
+        if "/weather" in p:
             return "WEATHER"
-        if "directory" in p or "contact" in p or "department" in p:
+        if "/directory" in p or "contact" in p or "/department" in p:
             return "DIRECTORY"
         return "INTIP"
 

@@ -57,44 +57,65 @@ class CardSynthesizer:
             return None
         items: List[ListItem] = []
 
-        if isinstance(data, list):
-            for item in data[:4]:
-                if isinstance(item, dict):
-                    name = item.get("routeName") or item.get("routeNo") or item.get("lineName") or "버스 노선"
-                    eta = item.get("estimatedMinutes") or item.get("eta") or item.get("restStopCount") or "운행중"
-                    stop = item.get("currentStation") or item.get("stopName") or ""
-                    sub = f"{stop} · {eta}" if stop else str(eta)
-                    items.append(
-                        ListItem(
-                            title=str(name),
-                            subtitle=sub,
-                            tag="실시간",
-                        )
-                    )
-        elif isinstance(data, dict):
-            arrivals = data.get("arrivals") or data.get("sections") or data.get("historyRecords") or []
-            stop_name = data.get("stopName") or data.get("tabName") or ""
+        arrivals = []
+        valid_routes = []
+        stop_name = "인천대입구역"
+
+        if isinstance(data, dict):
+            arrivals = data.get("arrivals") or []
+            valid_routes = data.get("validRoutes") or []
+            stop_name = data.get("stopName") or data.get("tabName") or "버스 정류장"
+        elif isinstance(data, list):
+            arrivals = data
+
+        if arrivals:
             for item in arrivals[:4]:
                 if isinstance(item, dict):
-                    route = item.get("routeNo") or item.get("routeName") or item.get("sectionName") or "노선"
-                    time_val = item.get("arrivalEstimateTime") or item.get("time") or item.get("eta") or "운행중"
+                    route = item.get("routeNo") or item.get("routeName") or "버스"
+                    route_display = f"{route}번 버스" if not str(route).endswith("번") and str(route).replace("순환", "").isdigit() else f"{route} 버스"
+                    time_raw = item.get("arrivalEstimateTime") or item.get("time")
                     rest = item.get("restStopCount")
-                    sub = f"{rest}개 전 ({time_val})" if rest else str(time_val)
+                    
+                    mins = 0
+                    try:
+                        if time_raw and str(time_raw).isdigit():
+                            mins = int(time_raw) // 60
+                    except Exception:
+                        pass
+
+                    if mins > 0:
+                        sub = f"약 {mins}분 후 도착" + (f" ({rest}개 정류소 전)" if rest else "")
+                    elif rest:
+                        sub = f"{rest}개 정류소 전 (곧 도착)"
+                    else:
+                        sub = "곧 도착 예정"
+
                     items.append(
                         ListItem(
-                            title=f"{route}번" if str(route).isdigit() else str(route),
+                            title=route_display,
                             subtitle=sub,
-                            tag="도착예정",
+                            tag="실시간 도착",
                         )
                     )
+        elif valid_routes:
+            for r in valid_routes[:4]:
+                r_display = f"{r}번 버스" if not str(r).endswith("번") and str(r).replace("순환", "").isdigit() else f"{r} 버스"
+                items.append(
+                    ListItem(
+                        title=r_display,
+                        subtitle="현재 운행 대기 또는 도착 정보 없음",
+                        tag="운행 정보",
+                    )
+                )
 
         if not items:
             return None
 
+        footer = "인팁(INTIP) 공식 등하교 버스 노선 기준" if arrivals else "인팁(INTIP) 공식 등하교 버스 노선 기준 (현재 도착 예정 버스 없음)"
         return ListCard(
-            title="🚌 실시간 버스 도착 정보",
+            title=f"🚌 {stop_name} 버스 도착 정보",
             items=items,
-            footer_text="실시간 교통 및 신호 상태에 따라 도착 시간에 오차가 발생할 수 있습니다.",
+            footer_text=footer,
         )
 
     @classmethod
