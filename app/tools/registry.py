@@ -1,6 +1,6 @@
 """
 Central Tool Registry for inu-agent-core
-Manages both OpenAPI-derived tools and custom extension tools.
+Manages both OpenAPI-derived tools and Client Action tools (Coocon model).
 """
 from typing import Dict, List, Optional
 from pathlib import Path
@@ -9,6 +9,8 @@ import json
 from app.core.logging import logger
 from app.tools.base import BaseTool
 from app.tools.openapi import OpenApiConnector, OpenApiTool
+from app.tools.action_tool import ClientActionTool
+from app.rules.registry import action_rule_registry
 
 
 class ToolRegistry:
@@ -24,6 +26,17 @@ class ToolRegistry:
 
     def list_tools(self) -> List[BaseTool]:
         return list(self._tools.values())
+
+    def register_client_action_rules(self) -> int:
+        """
+        Register external action rules (LMS, Library, Portal) as callable LLM tools.
+        """
+        rules = action_rule_registry.list_rules()
+        for rule in rules:
+            action_tool = ClientActionTool(rule)
+            self.register(action_tool)
+        logger.info(f"Registered {len(rules)} Client Action tools (LMS, Library, Portal).")
+        return len(rules)
 
     async def sync_inu_portal_tools(self) -> int:
         """
@@ -50,6 +63,11 @@ class ToolRegistry:
 
         logger.info(f"Successfully synced {len(parsed_tools)} tools from INU Portal OpenAPI spec")
         return len(parsed_tools)
+
+    async def initialize_all_tools(self) -> None:
+        """Initialize both internal OpenAPI tools and external Client Action tools."""
+        self.register_client_action_rules()
+        await self.sync_inu_portal_tools()
 
 
 tool_registry = ToolRegistry()

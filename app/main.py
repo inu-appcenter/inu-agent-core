@@ -15,12 +15,12 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} in [{settings.APP_ENV}] mode...")
     logger.info(f"Target LLM: {settings.LLM_MODEL_NAME} at {settings.LLM_BASE_URL}")
 
-    # Synchronize OpenAPI tools from inu-portal-server
+    # Initialize all tools (Client Action Rules + OpenAPI Tools)
     try:
-        synced_count = await tool_registry.sync_inu_portal_tools()
-        logger.info(f"Tool registry initialized with {synced_count} active tools.")
+        await tool_registry.initialize_all_tools()
+        logger.info(f"Tool registry initialized with {len(tool_registry.list_tools())} active tools.")
     except Exception as e:
-        logger.error(f"Error during tool registry synchronization: {e}", exc_info=True)
+        logger.error(f"Error during tool registry initialization: {e}", exc_info=True)
 
     yield
 
