@@ -42,6 +42,10 @@ class CardSynthesizer:
             return cls._build_schedule_card(data)
         elif domain == "LMS":
             return cls._build_lms_card(data)
+        elif domain == "DIRECTORY":
+            return cls._build_directory_card(data)
+        elif domain == "WEATHER":
+            return cls._build_weather_card(data)
         elif domain in ["INU_AI_KNOWLEDGE", "INU_AI", "CITATION"]:
             return cls._build_inuchat_citation_card(data)
 
@@ -296,10 +300,60 @@ class CardSynthesizer:
         if not items:
             return None
 
+    @classmethod
+    def _build_directory_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+        if not data:
+            return None
+        items: List[ListItem] = []
+        contacts = data if isinstance(data, list) else (data.get("items") or data.get("contacts") or [])
+
+        for c in contacts[:4]:
+            if isinstance(c, dict):
+                name = c.get("name") or c.get("deptName") or "연락처"
+                phone = c.get("phone") or c.get("tel") or ""
+                office = c.get("office") or c.get("location") or ""
+                role = c.get("role") or c.get("dept") or "교직원"
+                sub = f"📞 {phone} | 🏢 {office}".strip(" |")
+                items.append(
+                    ListItem(
+                        title=str(name),
+                        subtitle=sub,
+                        tag=str(role)[:6],
+                        link=f"tel:{phone}" if phone else None,
+                    )
+                )
+
+        if not items:
+            return None
+
         return ListCard(
-            title="📝 사이버캠퍼스(LMS) 과제 및 일정",
+            title="📞 교내 전화번호부 및 연락처",
             items=items,
-            footer_text="과제 제출 및 온라인 강의 수강은 사이버캠퍼스에서 진행할 수 있습니다.",
+            footer_text="전화번호 및 사무실 위치 정보를 확인하세요.",
         )
+
+    @classmethod
+    def _build_weather_card(cls, data: Optional[Any] = None) -> Optional[MetricCard]:
+        if not data or not isinstance(data, dict):
+            return None
+        temp = data.get("temp") or data.get("temperature") or "--°C"
+        sky = data.get("sky") or data.get("condition") or "맑음"
+        pm10 = data.get("pm10") or data.get("airQuality") or "보통"
+        rain = data.get("rain") or data.get("precipitation") or "0mm"
+
+        return MetricCard(
+            title="⛅ 송도 캠퍼스 실시간 날씨",
+            main_metric=MetricCardItem(
+                label="현재 기온",
+                value=f"{temp}",
+            ),
+            sub_details=[
+                MetricCardItem(label="하늘 상태", value=str(sky)),
+                MetricCardItem(label="미세먼지", value=str(pm10)),
+                MetricCardItem(label="강수량", value=str(rain)),
+            ],
+            footer_text="기상청 실시간 송도 캠퍼스 관측 데이터 기반",
+        )
+
 
 
