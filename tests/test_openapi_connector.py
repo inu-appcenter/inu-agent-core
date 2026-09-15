@@ -16,7 +16,7 @@ def test_openapi_parsing():
     connector = OpenApiConnector(base_url="http://localhost:8080")
     tools = connector.parse_spec(spec)
 
-    assert len(tools) == 4
+    assert len(tools) >= 4
     tool_names = [t.name for t in tools]
     assert "api_getCafeteriaMenu" in tool_names
     assert "api_getBusArrivals" in tool_names

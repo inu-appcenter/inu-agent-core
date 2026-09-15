@@ -103,6 +103,94 @@
           }
         }
       }
+    },
+    "/api/directory/search": {
+      "get": {
+        "tags": ["Directory"],
+        "summary": "교내 전화번호부 및 연락처 검색",
+        "description": "교수, 학과 사무실(과사), 교직원, 부서의 전화번호, 이메일, 연구실/사무실 위치를 검색합니다.",
+        "operationId": "searchContacts",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "description": "검색어 (교수명, 학과명, 부서명, 과사 등)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "조회 성공"
+          }
+        }
+      }
+    },
+    "/api/weather": {
+      "get": {
+        "tags": ["Weather"],
+        "summary": "송도 캠퍼스 실시간 날씨 및 미세먼지 조회",
+        "description": "인천대학교 송도 캠퍼스의 실시간 기온, 하늘 상태, 강수, 미세먼지(PM10) 등급을 조회합니다.",
+        "operationId": "getWeather",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "조회 성공"
+          }
+        }
+      }
+    },
+    "/api/calendar": {
+      "get": {
+        "tags": ["Schedule"],
+        "summary": "학사일정 캘린더 조회",
+        "description": "연도와 월별 주요 학사일정 및 학과 일정을 조회합니다.",
+        "operationId": "getAcademicCalendar",
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "description": "연도 (예: 2026)",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "description": "월 (1~12)",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "조회 성공"
+          }
+        }
+      }
+    },
+    "/api/timetables/gap": {
+      "get": {
+        "tags": ["TimeTables"],
+        "summary": "오늘의 공강 시간 계산",
+        "description": "오늘 강의 시간표 사이의 공강 시간과 빈 강의실/휴식 공간을 계산하여 안내합니다.",
+        "operationId": "getTimetableGap",
+        "security": [
+          { "bearerAuth": [] }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "조회 성공"
+          }
+        }
+      }
     }
   }
 }

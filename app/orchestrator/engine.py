@@ -30,11 +30,12 @@ class AgentOrchestrator:
             yield AgentStreamEvent(event_type="DONE")
             return
 
-        # 1. Tool Pruning: select top 3-4 most relevant tools from registry
+        # 1. Tool Pruning: select top 3-4 most relevant tools from registry with multi-turn context
         all_tools = tool_registry.list_tools()
         pruned_tools = ToolPruner.prune(
             query=request.message,
             tools=all_tools,
+            history=request.history,
             client=request.client,
             max_tools=4,
         )
