@@ -40,12 +40,9 @@ class ToolPruner:
             if any(kw in q for kw in keywords):
                 matched_categories.add(category)
 
-        # Client-specific default categories if no keyword matched
+        # If no domain keywords match, treat as general conversation (no tools needed)
         if not matched_categories:
-            if client.upper() == "UNIDORM":
-                matched_categories.update(["DORM", "CAFETERIA", "BUS"])
-            else:
-                matched_categories.update(["CAFETERIA", "BUS", "TIMETABLE"])
+            return []
 
         # Score tools
         scored_tools = []
