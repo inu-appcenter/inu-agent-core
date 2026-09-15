@@ -300,6 +300,12 @@ class CardSynthesizer:
         if not items:
             return None
 
+        return ListCard(
+            title="📝 이러닝(LMS) 과제 및 일정",
+            items=items,
+            footer_text="과제 제출 및 온라인 강의 수강은 이러닝 시스템에서 진행할 수 있습니다.",
+        )
+
     @classmethod
     def _build_directory_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
         if not data:

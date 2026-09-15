@@ -87,13 +87,13 @@ class AgentOrchestrator:
                             logger.warning(f"Failed to generate client action for tool {tool.name}: {ex}")
 
                     if f"[{tool.category}_STATUS]" not in tool_summary_text:
-                        domain_name_kr = "사이버캠퍼스(LMS)" if tool.category == "LMS" else ("도서관" if tool.category == "LIBRARY" else "포털 종합정보")
+                        domain_name_kr = "이러닝(LMS)" if tool.category == "LMS" else ("도서관" if tool.category == "LIBRARY" else "포털 종합정보")
                         tool_summary_text += (
                             f"\n[{tool.category}_STATUS] ({domain_name_kr} 데이터 연동 상태):\n"
                             f"- 개인정보 보호 및 보안(Zero-Knowledge) 원칙에 따라, {domain_name_kr}의 개인 과제, 수강 강좌, 출석, 성적 등은 사용자 기기(INTIP 앱) 연동을 통해서만 안전하게 실시간 조회됩니다.\n"
                             f"- 현재 세션에는 연동된 실제 학생의 {domain_name_kr} 데이터가 없습니다.\n"
                             f"- [절대 금지]: 가상의 과목명(경영학원론, 데이터구조 등), 가상의 과제명, 가상의 마감 일자를 절대로 지어내거나 임의의 표로 작성하지 마십시오.\n"
-                            f"- [응답 지침]: 현재 연동된 과제/강좌 정보가 없으므로, 실시간 과제 마감과 강의 진도를 확인하려면 사이버캠퍼스(LMS) 계정 연동(INTIP 앱 지원)이 필요함을 친절히 안내하십시오.\n"
+                            f"- [응답 지침]: 현재 연동된 과제/강좌 정보가 없으므로, 실시간 과제 마감과 강의 진도를 확인하려면 이러닝(LMS) 계정 연동(INTIP 앱 지원)이 필요함을 친절히 안내하십시오.\n"
                         )
 
             # Case B: Server OpenAPI Tool (Cafeteria, Bus, Timetable, Notices, Schedule, Directory, Weather)
