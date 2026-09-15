@@ -20,7 +20,12 @@ async def chat_stream(
     if x_appcenter_client:
         request.client = x_appcenter_client.upper()
 
-    logger.info(f"Incoming chat request: '{request.message[:30]}...' from client: {request.client}")
+    if authorization:
+        if request.client_context is None:
+            request.client_context = {}
+        request.client_context["authorization"] = authorization
+
+    logger.info(f"Incoming chat request: '{request.message[:30]}...' from client: {request.client} (Auth: {bool(authorization)})")
 
     async def event_generator():
         try:
