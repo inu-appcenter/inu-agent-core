@@ -68,6 +68,7 @@ jobs:
         with:
           host: ${{ secrets.HOST_ADDRESS }}
           username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.PASSWORD || secrets.SERVER_PASSWORD }}
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           source: "docker-compose.yml"
@@ -78,6 +79,7 @@ jobs:
         with:
           host: ${{ secrets.HOST_ADDRESS }}
           username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.PASSWORD || secrets.SERVER_PASSWORD }}
           key: ${{ secrets.SERVER_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           script: |
