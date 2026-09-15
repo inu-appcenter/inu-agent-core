@@ -1,0 +1,108 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "INU Portal API",
+    "version": "v1.0"
+  },
+  "paths": {
+    "/api/cafeterias": {
+      "get": {
+        "tags": ["Cafeterias"],
+        "summary": "학식 메뉴 가져오기",
+        "description": "식당 이름과 요일(1~7)을 보내주세요. [조식, 중식, 석식] 순으로 반환됩니다.",
+        "operationId": "getCafeteriaMenu",
+        "parameters": [
+          {
+            "name": "cafeteria",
+            "in": "query",
+            "description": "식당 이름 (학생식당, 제1기숙사식당, 2기숙사 식당, 27호관식당, 사범대식당)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "day",
+            "in": "query",
+            "description": "요일 (1: 월 ~ 7: 일)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "조회 성공"
+          }
+        }
+      }
+    },
+    "/api/buses/arrivals": {
+      "get": {
+        "tags": ["Buses"],
+        "summary": "실시간 버스 도착 정보 조회",
+        "description": "정류소 ID 기반 실시간 셔틀/시내버스 도착 정보를 제공합니다.",
+        "operationId": "getBusArrivals",
+        "parameters": [
+          {
+            "name": "bstopId",
+            "in": "query",
+            "description": "정류소 ID (예: 165000384)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "조회 성공"
+          }
+        }
+      }
+    },
+    "/api/timetables/today": {
+      "get": {
+        "tags": ["TimeTables"],
+        "summary": "오늘의 내 시간표 조회",
+        "description": "로그인한 학생의 당일 강의 시간표 및 강의실 정보를 조회합니다.",
+        "operationId": "getTodayTimeTable",
+        "security": [
+          { "bearerAuth": [] }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "조회 성공"
+          }
+        }
+      }
+    },
+    "/api/notices": {
+      "get": {
+        "tags": ["Notices"],
+        "summary": "캠퍼스 공지사항 목록 조회",
+        "description": "학사, 장학, 채용 등 카테고리별 최신 학교 공지사항을 조회합니다.",
+        "operationId": "getNotices",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "description": "공지 카테고리 (학사, 장학, 일반, 행사)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "조회 성공"
+          }
+        }
+      }
+    }
+  }
+}
