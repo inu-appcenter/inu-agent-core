@@ -337,7 +337,7 @@ class CardSynthesizer:
                 cat = n.get("category") or n.get("subCategory") or "공지"
                 notice_url = n.get("url") or n.get("link")
                 if not notice_url and n.get("id"):
-                    notice_url = f"/notice/{n.get('id')}"
+                    notice_url = f"/home/notice/{n.get('id')}"
 
                 items.append(
                     ListItem(
@@ -695,7 +695,7 @@ class CardSynthesizer:
             type="AGENT_REMINDER_SETTING",
             title="⏰ AI 맞춤 알림 관리",
             data=data if isinstance(data, dict) else {"reminders": data},
-            link=CardLink(label="맞춤 알림 관리", route="/mypage/notification/reminder"),
+            link=CardLink(label="맞춤 알림 관리", route="/mypage/notification/daily-brief?tab=agent"),
         )
 
     @classmethod
@@ -717,7 +717,7 @@ class CardSynthesizer:
             type="KEYWORD_SETTING",
             title="🔔 공지사항 키워드 알림",
             data=data if isinstance(data, dict) else {"keywords": data},
-            link=CardLink(label="키워드 알림 관리", route="/mypage/notification/keyword"),
+            link=CardLink(label="키워드 알림 관리", route="/mypage/notification"),
         )
 
     @classmethod
