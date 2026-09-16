@@ -17,6 +17,7 @@ from app.orchestrator.prompts import (
 from app.orchestrator.retriever import tool_retriever
 from app.orchestrator.card_synthesizer import CardSynthesizer
 from app.orchestrator.router import AgentRouter
+from app.tools.base import BaseTool
 from app.tools.registry import tool_registry
 
 
