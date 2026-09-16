@@ -27,6 +27,10 @@ class ToolRegistry:
     def get_tool(self, name: str) -> Optional[BaseTool]:
         return self._tools.get(name)
 
+    def get_tools_by_category(self, category: str) -> List[BaseTool]:
+        cat_upper = category.upper()
+        return [t for t in self._tools.values() if t.category.upper() == cat_upper]
+
     def list_tools(self) -> List[BaseTool]:
         return list(self._tools.values())
 

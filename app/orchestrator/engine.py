@@ -102,7 +102,15 @@ class AgentOrchestrator:
             thinking=initial_thought,
         )
 
-        first_hop_categories = [c.upper() for c in initial_plan.get("tools", [])]
+        raw_initial_tools = initial_plan.get("tools", [])
+        first_hop_categories = []
+        for item in raw_initial_tools:
+            if isinstance(item, str):
+                first_hop_categories.append(item.upper())
+            elif isinstance(item, dict):
+                val = item.get("name") or item.get("category") or item.get("tool") or ""
+                if val:
+                    first_hop_categories.append(str(val).upper())
 
         # Filter 1st-hop tools to execute
         first_tools = []
@@ -111,9 +119,13 @@ class AgentOrchestrator:
             if matching:
                 first_tools.extend(matching)
             else:
-                reg_tool = tool_registry.get_tool(cat.lower())
-                if reg_tool:
-                    first_tools.append(reg_tool)
+                cat_tools = tool_registry.get_tools_by_category(cat)
+                if cat_tools:
+                    first_tools.extend(cat_tools)
+                else:
+                    reg_tool = tool_registry.get_tool(cat.lower())
+                    if reg_tool:
+                        first_tools.append(reg_tool)
 
         # Fallback if no matching tools found
         if not first_tools and candidate_tools:
@@ -158,7 +170,12 @@ class AgentOrchestrator:
         )
 
         sec_thought = sec_plan.get("thought", "").strip()
-        sec_categories = [c.upper() for c in sec_plan.get("tools", []) if c.upper() not in executed_categories]
+        raw_sec_tools = sec_plan.get("tools", [])
+        sec_categories = []
+        for item in raw_sec_tools:
+            name_val = item if isinstance(item, str) else (item.get("name") or item.get("category") or item.get("tool") or "")
+            if name_val and str(name_val).upper() not in executed_categories:
+                sec_categories.append(str(name_val).upper())
 
         if sec_categories:
             if sec_thought:

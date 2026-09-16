@@ -172,8 +172,20 @@ class AgentRouter:
                 h_lines.append(f"- {role}: {content}")
             history_str = "\n[최근 대화 흐름]:\n" + "\n".join(h_lines) + "\n"
 
+        # Ensure core campus domain tools are always visible in candidate catalog
+        core_categories = {"PORTAL", "LIBRARY", "LMS", "BUS", "CAFETERIA", "TIMETABLE", "SCHEDULE", "NOTICE", "DIRECTORY", "WEATHER", "CAMPUS_WATCH", "INU_AI_KNOWLEDGE"}
+        all_candidate_tools = list(candidate_tools)
+        existing_cats = {t.category.upper() for t in all_candidate_tools}
+        
+        from app.tools.registry import tool_registry
+        for cat in core_categories:
+            if cat not in existing_cats:
+                cat_tools = tool_registry.get_tools_by_category(cat)
+                if cat_tools:
+                    all_candidate_tools.append(cat_tools[0])
+
         tool_catalog = []
-        for t in candidate_tools:
+        for t in all_candidate_tools:
             tool_catalog.append(f"- {t.category} ({t.name}): {t.description}")
         tool_catalog_str = "\n".join(tool_catalog)
 
@@ -187,7 +199,7 @@ class AgentRouter:
                 "tools": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "실행할 도구 카테고리 목록 (예: ['PORTAL'], ['BUS'], ['CAFETERIA'], ['INU_AI_KNOWLEDGE'] 등)",
+                    "description": "실행할 도구 카테고리 목록 (예: ['PORTAL'], ['LIBRARY'], ['BUS'], ['CAFETERIA'], ['INU_AI_KNOWLEDGE'] 등)",
                 },
             },
             "required": ["thought", "tools"],
@@ -198,21 +210,26 @@ class AgentRouter:
 
 [핵심 지침]:
 1. 사용자의 질문 의도를 명확히 파악하고 필요한 도구들을 선별하세요.
-2. [1인칭 졸업/학사 판정 질의]:
+2. [개인 학적 및 성적 질의]:
+   '내 학적 정보', '내 학번/학과', '내 성적', '취득학점' 등 개인 학적/성적 관련 질문은 반드시 'PORTAL' 도구를 선택하세요.
+3. [1인칭 졸업/학사 판정 질의]:
    '나 졸업 가능해?', '나 졸업 요건 돼?', '내 취득학점'처럼 1인칭으로 본인의 졸업/학점을 묻는 질문은,
    학생 본인의 학적(소속 학과, 학번, 취득 학점) 확인이 필수적이므로 먼저 'PORTAL'을 반드시 포함하세요.
-3. [일반 학과 규정/학칙 질의]:
+4. [일반 학과 규정/학칙 질의]:
    '컴퓨터공학과 졸업 요건 알려줘'처럼 3인칭 또는 일반 학과 규정을 묻는 질문은 개인 학적 조회가 불필요하므로 'INU_AI_KNOWLEDGE'만 선택하세요.
-4. [판단 이유 (thought) 작성 및 정직성 규칙]:
+5. [도서관 열람실 잔여 좌석 및 스터디룸 현황 질의]:
+   '열람실 잔여 좌석', '도서관 좌석 현황', '열람실 몇 자리 남았어?', '스터디룸 목록', '스터디룸 예약 가능한 곳' 등 학산도서관의 현재 잔여 좌석이나 스터디룸 관련 질문은 반드시 'LIBRARY' 도구를 선택하세요. (빈자리 푸시 알림/감시 예약 요청이 아닌 단순 현황 질문은 절대 CAMPUS_WATCH가 아닌 LIBRARY를 선택해야 합니다.)
+6. [도서관 빈자리 알림/스나이퍼 질의]:
+   '자리 나면 알려줘', '알림 걸어줘', '취소표 나오면 알려줘', '빈자리 감시'처럼 빈자리 발생 시 푸시 알림/예약을 요구하는 질문은 단순 잔여 좌석 조회가 아니므로 반드시 'CAMPUS_WATCH' 도구를 선택하세요.
+7. [판단 이유 (thought) 작성 및 정직성 규칙]:
    - 반드시 실제 선택한 'tools' 목록에 부합하는 판단 이유만 작성해야 합니다.
    - 예: 'PORTAL' 도구를 선택하지 않았으면서 "학우님의 학적/학점 정보와 대조하고 있습니다" 같은 가짜 행동(Hallucination)을 작성하는 것은 절대 금지됩니다!
    - 질문에 등장한 대상(예: 정문 버스, 공학관 학식, 컴퓨터공학부 졸업 요건 등)을 직접 언급하며 실제 실행할 도구의 목적을 솔직하게 작성하세요.
+   - 예 (도서관 좌석 질의): '학산도서관 열람실의 실시간 잔여 좌석 현황을 확인하고 있습니다.'
    - 예 (학칙 질의): '컴퓨터공학부의 공식 학칙 및 졸업 요건 규정을 지식베이스에서 확인하고 있습니다.'
    - 예 (버스 질의): '인천대 정문 정류소의 실시간 시내버스 도착 정보를 확인하고 있습니다.'
    - 예 (학식 질의): '오늘의 교내 학생식당 메뉴와 운영 현황을 조회하고 있습니다.'
    - 예 (빈자리 알림/스나이퍼): '학산도서관 실시간 빈자리 감시(스나이퍼) 및 푸시 알림 예약을 진행하고 있습니다.'
-5. [도서관 빈자리 알림/스나이퍼 질의]:
-   '자리 나면 알려줘', '알림 걸어줘', '취소표 나오면 알려줘', '빈자리 감시'처럼 빈자리 발생 시 푸시 알림/예약을 요구하는 질문은 단순 잔여 좌석 조회가 아니므로 반드시 'CAMPUS_WATCH' 도구를 선택하세요.
 
 {history_str}
 [사용 가능한 도구 목록]:
