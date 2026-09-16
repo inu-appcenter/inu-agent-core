@@ -143,8 +143,14 @@ GenerativeCard = Union[MetricCard, StatusCard, ListCard, ActionCard, ComponentCa
 # -----------------------------------------------------------------------------
 
 class AgentStreamEvent(BaseModel):
-    event_type: Literal["TOKEN", "ACTION_REQUIRED", "CARD", "ERROR", "DONE"]
+    event_type: Literal["TOKEN", "ACTION_REQUIRED", "CARD", "ERROR", "DONE", "STATUS", "THINKING"]
     content: Optional[str] = None
     action: Optional[ClientActionInstruction] = None
     card: Optional[GenerativeCard] = None
     error: Optional[str] = None
+    # Live tool integration & thinking status
+    status_id: Optional[str] = None
+    status_title: Optional[str] = None
+    status_category: Optional[str] = None
+    status_state: Optional[Literal["running", "completed"]] = None
+    thinking: Optional[str] = None

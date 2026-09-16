@@ -33,6 +33,11 @@ class AgentOrchestrator:
             return
 
         # 1. Semantic Tool Retrieval: select top 3-4 most relevant tools via In-Memory Tool RAG
+        yield AgentStreamEvent(
+            event_type="THINKING",
+            thinking="질문의 의도를 파악하고 필요한 캠퍼스 시스템 연계를 확인하고 있습니다...",
+        )
+
         if not tool_retriever.is_indexed:
             await tool_retriever.index_tools(tool_registry.list_tools())
 
@@ -52,10 +57,31 @@ class AgentOrchestrator:
         emitted_cards = set()
         emitted_actions = set()
 
+        tool_titles = {
+            "PORTAL": "포털 종합정보(ERP) 학적 데이터",
+            "LMS": "이러닝(LMS) 강의 및 과제",
+            "LIBRARY": "학산도서관 좌석/열람실 시스템",
+            "CAFETERIA": "학생식당 메뉴 정보",
+            "BUS": "실시간 버스 도착 정보",
+            "NOTICE": "학교 공식 공지사항",
+            "SCHEDULE": "학사 일정 정보",
+            "DIRECTORY": "교내 부서/학과 연락처",
+            "INU_AI_KNOWLEDGE": "인천대학교 학칙·규정 지식베이스",
+        }
+
         # 2. Execute tools if matched and synthesize SDUI cards
         for tool in pruned_tools:
+            tool_display_name = tool_titles.get(tool.category, tool.name)
+
             # Case A: Client Action (LMS, Portal ERP) -> Check client_context or emit instruction
             if tool.category in ["LMS", "PORTAL"]:
+                yield AgentStreamEvent(
+                    event_type="STATUS",
+                    status_id=f"tool_{tool.category.lower()}",
+                    status_title=f"{tool_display_name} 연동 중...",
+                    status_category=tool.category,
+                    status_state="running",
+                )
                 client_ctx = request.client_context or {}
                 if tool.category == "PORTAL":
                     # Check academic and academicDisplay first, then portal
@@ -199,6 +225,14 @@ class AgentOrchestrator:
                                 f"- [응답 지침]: 현재 연동된 이러닝 정보가 없으므로, 위 연동 경로를 안내하며 앱 내 연동이 필요함을 친절히 안내하십시오.\n"
                             )
 
+                yield AgentStreamEvent(
+                    event_type="STATUS",
+                    status_id=f"tool_{tool.category.lower()}",
+                    status_title=f"{tool_display_name} 연동 확인",
+                    status_category=tool.category,
+                    status_state="completed",
+                )
+
             # Case B: Server OpenAPI / Direct Tools (Cafeteria, Bus, Timetable, Notices, Schedule, Directory, Weather, Library)
             elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY"]:
                 # DIRECTORY 도구: 사용자 질의에 연락처/전화번호/사무실/과사 등의 명확한 의도가 없으면 오작동 방지를 위해 스킵
@@ -208,6 +242,14 @@ class AgentOrchestrator:
                     if not has_contact_intent:
                         logger.info(f"Skipping DIRECTORY tool: no contact/directory intent in query '{request.message}'")
                         continue
+
+                yield AgentStreamEvent(
+                    event_type="STATUS",
+                    status_id=f"tool_{tool.category.lower()}",
+                    status_title=f"{tool_display_name} 조회 중...",
+                    status_category=tool.category,
+                    status_state="running",
+                )
 
                 tool_data = None
                 tool_args = await AgentRouter.extract_tool_arguments(
@@ -318,8 +360,23 @@ class AgentOrchestrator:
                         yield AgentStreamEvent(event_type="CARD", card=card)
                         emitted_cards.add(tool.category)
 
+                yield AgentStreamEvent(
+                    event_type="STATUS",
+                    status_id=f"tool_{tool.category.lower()}",
+                    status_title=f"{tool_display_name} 확인 완료",
+                    status_category=tool.category,
+                    status_state="completed",
+                )
+
             # Case C: INUChat Official Knowledge RAG Tool (Academic Regulations, Graduation, Policies)
             elif tool.category == "INU_AI_KNOWLEDGE":
+                yield AgentStreamEvent(
+                    event_type="STATUS",
+                    status_id="tool_knowledge",
+                    status_title=f"{tool_display_name} 검색 중...",
+                    status_category="INU_AI_KNOWLEDGE",
+                    status_state="running",
+                )
                 try:
                     res = await tool.execute({"question": request.message}, exec_context)
                     if isinstance(res, dict) and res.get("success") and res.get("data"):
@@ -342,6 +399,14 @@ class AgentOrchestrator:
                 except Exception as ex:
                     logger.warning(f"Error executing INUChat tool {tool.name}: {ex}")
 
+                yield AgentStreamEvent(
+                    event_type="STATUS",
+                    status_id="tool_knowledge",
+                    status_title=f"{tool_display_name} 검색 완료",
+                    status_category="INU_AI_KNOWLEDGE",
+                    status_state="completed",
+                )
+
         # 3. Build System Prompt with Grounding Data
         system_prompt = get_system_prompt_for_client(request.client, tool_summary=tool_summary_text)
 
@@ -359,6 +424,12 @@ class AgentOrchestrator:
         try:
             logger.info(
                 f"Starting stream for '{request.message[:30]}...' (Tools executed: {len(pruned_tools)}, HasData: {bool(tool_summary_text)})"
+            )
+
+            # Emit final thinking event before token generation
+            yield AgentStreamEvent(
+                event_type="THINKING",
+                thinking="수집된 정보를 바탕으로 명확하고 친절한 답변을 작성하고 있습니다.",
             )
 
             async for token in llm_client.stream_chat(
