@@ -56,13 +56,38 @@ class AgentOrchestrator:
             # Case A: Client Action (LMS, Portal ERP) -> Check client_context or emit instruction
             if tool.category in ["LMS", "PORTAL"]:
                 client_ctx = request.client_context or {}
-                domain_key = tool.category.lower()  # "lms", "portal"
-                domain_data = client_ctx.get(domain_key)
+                if tool.category == "PORTAL":
+                    # Check academic and academicDisplay first, then portal
+                    domain_data = client_ctx.get("academic") or client_ctx.get("academicDisplay") or client_ctx.get("portal")
+                    if isinstance(domain_data, dict) and list(domain_data.keys()) == ["linked"]:
+                        domain_data = client_ctx.get("academic") or client_ctx.get("academicDisplay")
+                else:
+                    domain_data = client_ctx.get("lms")
 
                 if domain_data and isinstance(domain_data, (dict, list)):
                     # Actual client context provided (e.g. from mobile app SSO)
                     logger.info(f"Using provided client_context for domain {tool.category}")
-                    tool_summary_text += f"\n[{tool.category} 실제 학생 연동 데이터]:\n{json.dumps(domain_data, ensure_ascii=False)[:1000]}\n"
+                    if tool.category == "PORTAL" and isinstance(domain_data, dict):
+                        dept = domain_data.get("departmentName") or domain_data.get("deptName") or ""
+                        colg = domain_data.get("collegeName") or ""
+                        status = domain_data.get("enrollmentStatus") or ""
+                        sem = domain_data.get("completedSemesterCount") or ""
+                        credits = domain_data.get("acquiredCredits") or ""
+                        gpa = domain_data.get("gradeAverage") or ""
+                        entry = domain_data.get("entryYear") or (domain_data.get("studentId", "")[:4] if domain_data.get("studentId") else "")
+                        name = domain_data.get("koreanName") or "학우"
+
+                        tool_summary_text += (
+                            f"\n[포털 종합정보(ERP) 학생 실제 학적 연동 데이터]:\n"
+                            f"- 성명/소속: {name}님 ({colg} {dept})\n"
+                            f"- 학적 상태: {status}" + (f" (이수 학기: {sem})" if sem else "") + "\n"
+                            f"- 취득 학점: {credits}학점 (평점 평균: {gpa})\n"
+                            f"- 입학 정보: {entry}학번\n"
+                            f"- [응답 지침]: 위 연동된 실제 학적 및 학점 데이터를 바탕으로 학생의 질문에 정확하고 친절하게 답변하세요.\n"
+                        )
+                    else:
+                        tool_summary_text += f"\n[{tool.category} 실제 학생 연동 데이터]:\n{json.dumps(domain_data, ensure_ascii=False)[:1000]}\n"
+
                     if tool.category not in emitted_cards:
                         card = CardSynthesizer.synthesize_for_domain(
                             domain=tool.category,
@@ -87,15 +112,35 @@ class AgentOrchestrator:
                             logger.warning(f"Failed to generate client action for tool {tool.name}: {ex}")
 
                     if f"[{tool.category}_STATUS]" not in tool_summary_text:
-                        domain_name_kr = "이러닝(LMS)" if tool.category == "LMS" else "포털 종합정보"
-                        item_kr = "과제, 수강 강좌, 출석" if tool.category == "LMS" else "성적, 취득 학점, 학적"
-                        tool_summary_text += (
-                            f"\n[{tool.category}_STATUS] ({domain_name_kr} 데이터 연동 상태):\n"
-                            f"- 개인정보 보호 및 보안(Zero-Knowledge) 원칙에 따라, {domain_name_kr}의 개인 {item_kr} 등은 사용자 기기(INTIP 앱) 연동을 통해서만 안전하게 실시간 조회됩니다.\n"
-                            f"- 현재 세션에는 연동된 실제 학생의 {domain_name_kr} 데이터가 없습니다.\n"
-                            f"- [절대 금지]: 가상의 과목명이나 가상의 {item_kr}를 절대로 지어내거나 임의의 표로 작성하지 마십시오.\n"
-                            f"- [응답 지침]: 현재 연동된 {domain_name_kr} 정보가 없으므로, 실시간 확인을 위해 {domain_name_kr} 계정 연동(INTIP 앱 지원)이 필요함을 친절히 안내하십시오.\n"
-                        )
+                        if tool.category == "PORTAL":
+                            portal_meta = client_ctx.get("portal") or {}
+                            err_code = portal_meta.get("academicErrorCode")
+                            err_msg = portal_meta.get("academicErrorMessage")
+                            if err_code == "NO_CREDENTIALS":
+                                reason_guide = "현재 INTIP 앱의 [설정] > [포털 계정 연동]에 포털 계정이 등록되어 있지 않습니다. 앱 설정에서 1회 계정을 연동해 주셔야 실시간 학적 조회가 가능합니다."
+                            elif err_code == "LOGIN_FAILED":
+                                reason_guide = "포털 로그인 인증에 실패했습니다. 포털 비밀번호가 최근 변경되었는지 확인하거나, INTIP 앱 설정에서 포털 계정 정보를 재등록해 주세요."
+                            elif err_code in ["ERP_ERROR", "NETWORK_ERROR"]:
+                                reason_guide = f"학교 포털(ERP) 시스템 응답 지연 또는 세션 오류가 발생했습니다. ({err_msg or '잠시 후 다시 시도'}). 학교 포털(portal.inu.ac.kr)에 접속하여 비밀번호 변경 팝업이 뜨는지 확인해 주세요."
+                            else:
+                                reason_guide = "개인정보 보호(Zero-Knowledge) 원칙에 따라 학생의 포털 학적은 모바일 INTIP 앱의 보안 영역(KeyStore) 연동을 통해서만 안전하게 실시간 조회됩니다."
+
+                            tool_summary_text += (
+                                f"\n[PORTAL_STATUS] (포털 종합정보 데이터 연동 상태):\n"
+                                f"- {reason_guide}\n"
+                                f"- 현재 세션에는 연동된 실제 학생의 학적/학점 데이터가 없습니다.\n"
+                                f"- [절대 금지]: 가상의 학과, 가상의 학점이나 성적을 절대로 지어내지 마십시오.\n"
+                                f"- [응답 지침]: 위 원인과 연동 방법을 친절하고 정확하게 학생에게 안내하십시오.\n"
+                            )
+                        else:
+                            domain_name_kr = "이러닝(LMS)"
+                            tool_summary_text += (
+                                f"\n[LMS_STATUS] (이러닝 데이터 연동 상태):\n"
+                                f"- 개인정보 보호 및 보안(Zero-Knowledge) 원칙에 따라, 이러닝의 개인 과제, 수강 강좌, 출석 등은 사용자 기기(INTIP 앱) 연동을 통해서만 안전하게 실시간 조회됩니다.\n"
+                                f"- 현재 세션에는 연동된 실제 학생의 이러닝 데이터가 없습니다.\n"
+                                f"- [절대 금지]: 가상의 과목명이나 가상의 과제를 절대로 지어내지 마십시오.\n"
+                                f"- [응답 지침]: 현재 연동된 이러닝 정보가 없으므로, 실시간 확인을 위해 이러닝 계정 연동(INTIP 앱 지원)이 필요함을 친절히 안내하십시오.\n"
+                            )
 
             # Case B: Server OpenAPI / Direct Tools (Cafeteria, Bus, Timetable, Notices, Schedule, Directory, Weather, Library)
             elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY"]:

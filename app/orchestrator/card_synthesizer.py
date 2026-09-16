@@ -48,6 +48,8 @@ class CardSynthesizer:
             return cls._build_weather_card(data)
         elif domain == "LIBRARY":
             return cls._build_library_card(data)
+        elif domain in ["PORTAL", "ACADEMIC"]:
+            return cls._build_academic_card(data)
         elif domain in ["INU_AI_KNOWLEDGE", "INU_AI", "CITATION"]:
             return cls._build_inuchat_citation_card(data)
 
@@ -456,6 +458,36 @@ class CardSynthesizer:
             title="📚 학술정보관 열람실 좌석 현황",
             items=items,
             footer_text="인천대학교 학술정보관 실시간 좌석 배정 시스템 기준",
+        )
+
+    @classmethod
+    def _build_academic_card(cls, data: Optional[Any] = None) -> Optional[MetricCard]:
+        if not data or not isinstance(data, dict):
+            return None
+        dept = data.get("departmentName") or data.get("deptName") or "학과 정보 없음"
+        colg = data.get("collegeName") or ""
+        status = data.get("enrollmentStatus") or "재학"
+        sem = data.get("completedSemesterCount") or ""
+        credits = data.get("acquiredCredits") or "0"
+        gpa = data.get("gradeAverage") or "--"
+        entry = data.get("entryYear") or (data.get("studentId", "")[:4] if data.get("studentId") else "")
+        entry_str = f"{entry}학번" if entry else "학번 정보 없음"
+
+        sub_details = [
+            MetricCardItem(label="학적 상태", value=f"{status}" + (f" ({sem})" if sem else "")),
+            MetricCardItem(label="취득 학점", value=f"{credits}학점"),
+            MetricCardItem(label="평점 평균", value=f"{gpa}"),
+            MetricCardItem(label="입학 정보", value=entry_str),
+        ]
+
+        return MetricCard(
+            title="🎓 나의 학적 및 학점 정보",
+            main_metric=MetricCardItem(
+                label="소속 학과",
+                value=f"{colg} {dept}".strip(),
+            ),
+            sub_details=sub_details,
+            footer_text="인천대학교 포털 종합정보시스템(ERP) 실시간 연동 기준",
         )
 
 

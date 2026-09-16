@@ -20,7 +20,16 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="User prompt or query")
     history: List[ChatMessage] = Field(default_factory=list, description="Recent conversation history")
     client: Literal["INTIP", "UNIDORM", "WEB"] = Field(default="INTIP", description="Originating client platform")
-    client_context: Optional[Dict[str, Any]] = Field(default=None, description="Client device context (e.g. linked accounts)")
+    client_context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        alias="clientContext",
+        description="Client device context (e.g. linked accounts)",
+    )
+
+    model_config = {
+        "populate_by_name": True,
+        "extra": "ignore",
+    }
 
 
 # -----------------------------------------------------------------------------
