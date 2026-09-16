@@ -609,6 +609,27 @@ class AgentOrchestrator:
                     elif tool.category == "CAMPUS_WATCH" and isinstance(res, dict):
                         tool_data = res
                         summary_out = f"\n[학산도서관 실시간 빈자리 알림/스나이퍼 감시 결과]:\n{res.get('summary', '')}\n"
+                    elif tool.category == "TIMETABLE":
+                        tool_data = res if res is not None else {}
+                        classes = []
+                        if isinstance(res, list):
+                            classes = res
+                        elif isinstance(res, dict):
+                            classes = res.get("items") or res.get("todayClasses") or res.get("courses") or []
+
+                        if not classes:
+                            summary_out = (
+                                "\n[INTIP 인팁 시간표 조회 결과]:\n"
+                                "- 오늘 등록된 수업/강의 일정이 없습니다 (또는 인팁 앱에 시간표가 등록되어 있지 않습니다).\n"
+                                "💡 지침: 학생에게 오늘 예정된 수업이 없거나 시간표가 등록되지 않았음을 친절히 안내하고, '인팁 앱의 [시간표] 탭에서 이번 학기 시간표를 추가하거나 확인할 수 있어요'라고 안내하세요.\n"
+                                "⚠️ 중요: 이 기능은 인팁(INTIP) 앱 자체의 시간표 기능이므로, 포털/LMS 계정 연동을 절대 요구하지 마세요.\n"
+                            )
+                        else:
+                            summary_out = (
+                                f"\n[INTIP 인팁 오늘의 수업 시간표]:\n"
+                                f"{json.dumps(classes, ensure_ascii=False)[:1000]}\n"
+                                f"💡 지침: 학생에게 오늘 수업 시간과 강의실을 명확히 안내하고, 하단의 [나의 수업 시간표] 카드에서 전체 시간표를 확인할 수 있다고 덧붙이세요.\n"
+                            )
                     else:
                         tool_data = res
                         summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"

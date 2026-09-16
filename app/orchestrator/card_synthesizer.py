@@ -215,32 +215,84 @@ class CardSynthesizer:
 
     @classmethod
     def _build_timetable_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
-        if not data:
-            return None
         items: List[ListItem] = []
-        lectures = data if isinstance(data, list) else data.get("todayClasses", [])
+        raw_items = []
+        if isinstance(data, list):
+            raw_items = data
+        elif isinstance(data, dict):
+            raw_items = data.get("items") or data.get("todayClasses") or data.get("courses") or []
 
-        for lecture in lectures[:4]:
-            if isinstance(lecture, dict):
-                name = lecture.get("courseName") or lecture.get("subject") or "강의"
-                time_str = lecture.get("time") or lecture.get("classTime") or ""
-                room = lecture.get("classroom") or lecture.get("room") or ""
+        for entry in raw_items:
+            if not isinstance(entry, dict):
+                continue
+            
+            # Handle TimeTableDetailItemResponseDto with course / customSchedule
+            course = entry.get("course") if isinstance(entry.get("course"), dict) else None
+            custom = entry.get("customSchedule") if isinstance(entry.get("customSchedule"), dict) else None
+            
+            if course:
+                name = course.get("title") or course.get("courseName") or "강의"
+                prof = course.get("professor") or ""
+                meetings = course.get("meetings") or []
+                time_list = []
+                for m in meetings:
+                    if isinstance(m, dict):
+                        day = m.get("dayOfWeek") or m.get("day") or ""
+                        st = m.get("startTime") or ""
+                        et = m.get("endTime") or ""
+                        room = m.get("room") or m.get("place") or ""
+                        time_str = f"{day} {st}~{et}".strip()
+                        if room:
+                            time_str += f" ({room})"
+                        time_list.append(time_str)
+                subtitle = " / ".join(time_list) if time_list else prof
                 items.append(
                     ListItem(
                         title=str(name),
-                        subtitle=f"{time_str} ({room})".strip(),
+                        subtitle=subtitle or f"교수: {prof}".strip(),
                         tag="강의",
                         link="/timetable",
                     )
                 )
+            elif custom:
+                name = custom.get("title") or "커스텀 일정"
+                items.append(
+                    ListItem(
+                        title=str(name),
+                        subtitle="개인 일정",
+                        tag="일정",
+                        link="/timetable",
+                    )
+                )
+            else:
+                name = entry.get("title") or entry.get("courseName") or entry.get("subject") or entry.get("name")
+                if name:
+                    time_str = entry.get("time") or entry.get("classTime") or entry.get("timeStr") or ""
+                    room = entry.get("classroom") or entry.get("room") or entry.get("place") or ""
+                    sub = f"{time_str} ({room})".strip() if room else time_str
+                    items.append(
+                        ListItem(
+                            title=str(name),
+                            subtitle=sub or "시간표 강의",
+                            tag="강의",
+                            link="/timetable",
+                        )
+                    )
 
         if not items:
-            return None
+            items.append(
+                ListItem(
+                    title="등록된 수업이 없습니다",
+                    subtitle="인팁 [시간표] 탭에서 이번 학기 시간표를 추가해보세요.",
+                    tag="안내",
+                    link="/timetable",
+                )
+            )
 
         return ListCard(
             title="🗓️ 나의 수업 시간표",
-            items=items,
-            footer_text="수업 강의실 및 시간을 확인하세요.",
+            items=items[:5],
+            footer_text="시간표 탭에서 전체 시간표를 확인하거나 수정할 수 있습니다.",
         )
 
     @classmethod
