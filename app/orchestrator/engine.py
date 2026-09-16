@@ -20,6 +20,78 @@ from app.orchestrator.router import AgentRouter
 from app.tools.registry import tool_registry
 
 
+def resolve_tool_display_name(category: str, name: str) -> str:
+    category_map = {
+        "PORTAL": "포털 종합정보(ERP) 학적 데이터",
+        "LMS": "이러닝(LMS) 강의 및 과제",
+        "LIBRARY": "학산도서관 좌석/열람실 시스템",
+        "CAFETERIA": "학생식당 메뉴 정보",
+        "BUS": "실시간 버스 도착 정보",
+        "NOTICE": "학교 공식 공지사항",
+        "SCHEDULE": "학사 일정 정보",
+        "TIMETABLE": "학사 강의 시간표 정보",
+        "DIRECTORY": "교내 부서/학과 연락처",
+        "WEATHER": "캠퍼스 날씨 정보",
+        "INU_AI_KNOWLEDGE": "인천대학교 학칙·규정 지식베이스",
+    }
+    if category in category_map:
+        return category_map[category]
+
+    name_lower = name.lower()
+    if "timetable" in name_lower:
+        return "학사 강의 시간표 정보"
+    elif "cafeteria" in name_lower or "menu" in name_lower:
+        return "학생식당 메뉴 정보"
+    elif "bus" in name_lower:
+        return "실시간 버스 도착 정보"
+    elif "notice" in name_lower:
+        return "학교 공식 공지사항"
+    elif "weather" in name_lower:
+        return "캠퍼스 날씨 정보"
+    elif "directory" in name_lower or "contact" in name_lower:
+        return "교내 부서 및 연락처"
+    elif "library" in name_lower or "seat" in name_lower:
+        return "학산도서관 시스템"
+
+    return name
+
+
+def generate_initial_thinking(query: str) -> str:
+    q = query.lower()
+    if any(w in q for w in ["버스", "셔틀", "정류장", "노선"]):
+        return "캠퍼스 셔틀 및 시내버스 운행 정보를 확인하고 있습니다..."
+    elif any(w in q for w in ["식당", "밥", "메뉴", "학식", "기숙사식당", "점심", "저녁"]):
+        return "오늘의 교내 식당 메뉴와 운영 현황을 확인하고 있습니다..."
+    elif any(w in q for w in ["도서관", "열람실", "좌석", "스터디룸"]):
+        return "학산도서관 열람실 좌석 및 시설 현황을 확인하고 있습니다..."
+    elif any(w in q for w in ["학점", "성적", "졸업", "휴학", "복학", "학적"]):
+        return "학우님의 학적/학점 정보와 인천대 학칙 규정을 대조하고 있습니다..."
+    elif any(w in q for w in ["과제", "강의", "출석", "lms", "이러닝", "수업"]):
+        return "이러닝(LMS) 과제 제출 기한과 수강 일정을 파악하고 있습니다..."
+    elif any(w in q for w in ["시간표", "강좌", "교수", "수강"]):
+        return "개설 강좌 및 시간표 시스템을 조회하고 있습니다..."
+    elif any(w in q for w in ["전화", "번호", "위치", "과사", "사무실"]):
+        return "교내 행정부서 및 학과 연락처를 검색하고 있습니다..."
+    elif any(w in q for w in ["공지", "장학", "모집", "행사", "일정"]):
+        return "학교 공식 공지사항과 주요 일정을 검색하고 있습니다..."
+    return f"'{query[:18]}...' 질문의 의도를 분석하고 필요한 캠퍼스 시스템을 확인하고 있습니다..."
+
+
+def generate_completion_thinking(tools: list) -> str:
+    categories = [t.category for t in tools]
+    if "BUS" in categories:
+        return "실시간 버스 도착 정보와 노선을 종합하여 최적의 경로를 안내합니다."
+    elif "CAFETERIA" in categories:
+        return "오늘의 식당별 메뉴와 운영 시간을 정리하고 있습니다."
+    elif "LIBRARY" in categories:
+        return "도서관 열람실 좌석 현황을 확인하여 바로 신청하실 수 있도록 준비합니다."
+    elif "PORTAL" in categories:
+        return "조회된 학적 데이터를 바탕으로 명확한 학사 안내를 작성하고 있습니다."
+    elif "INU_AI_KNOWLEDGE" in categories:
+        return "인천대학교 공식 규정을 바탕으로 신뢰할 수 있는 답변을 작성하고 있습니다."
+    return "수집된 정보를 바탕으로 명확하고 친절한 답변을 작성하고 있습니다."
+
+
 class AgentOrchestrator:
     async def run_stream(self, request: ChatRequest) -> AsyncGenerator[AgentStreamEvent, None]:
         """
@@ -35,7 +107,7 @@ class AgentOrchestrator:
         # 1. Semantic Tool Retrieval: select top 3-4 most relevant tools via In-Memory Tool RAG
         yield AgentStreamEvent(
             event_type="THINKING",
-            thinking="질문의 의도를 파악하고 필요한 캠퍼스 시스템 연계를 확인하고 있습니다...",
+            thinking=generate_initial_thinking(request.message),
         )
 
         if not tool_retriever.is_indexed:
@@ -57,27 +129,16 @@ class AgentOrchestrator:
         emitted_cards = set()
         emitted_actions = set()
 
-        tool_titles = {
-            "PORTAL": "포털 종합정보(ERP) 학적 데이터",
-            "LMS": "이러닝(LMS) 강의 및 과제",
-            "LIBRARY": "학산도서관 좌석/열람실 시스템",
-            "CAFETERIA": "학생식당 메뉴 정보",
-            "BUS": "실시간 버스 도착 정보",
-            "NOTICE": "학교 공식 공지사항",
-            "SCHEDULE": "학사 일정 정보",
-            "DIRECTORY": "교내 부서/학과 연락처",
-            "INU_AI_KNOWLEDGE": "인천대학교 학칙·규정 지식베이스",
-        }
-
         # 2. Execute tools if matched and synthesize SDUI cards
         for tool in pruned_tools:
-            tool_display_name = tool_titles.get(tool.category, tool.name)
+            tool_display_name = resolve_tool_display_name(tool.category, tool.name)
+            tool_id = f"tool_{tool.category.lower()}_{abs(hash(tool.name)) % 10000}"
 
             # Case A: Client Action (LMS, Portal ERP) -> Check client_context or emit instruction
             if tool.category in ["LMS", "PORTAL"]:
                 yield AgentStreamEvent(
                     event_type="STATUS",
-                    status_id=f"tool_{tool.category.lower()}",
+                    status_id=tool_id,
                     status_title=f"{tool_display_name} 연동 중...",
                     status_category=tool.category,
                     status_state="running",
@@ -245,7 +306,7 @@ class AgentOrchestrator:
 
                 yield AgentStreamEvent(
                     event_type="STATUS",
-                    status_id=f"tool_{tool.category.lower()}",
+                    status_id=tool_id,
                     status_title=f"{tool_display_name} 조회 중...",
                     status_category=tool.category,
                     status_state="running",
@@ -362,7 +423,7 @@ class AgentOrchestrator:
 
                 yield AgentStreamEvent(
                     event_type="STATUS",
-                    status_id=f"tool_{tool.category.lower()}",
+                    status_id=tool_id,
                     status_title=f"{tool_display_name} 확인 완료",
                     status_category=tool.category,
                     status_state="completed",
@@ -372,7 +433,7 @@ class AgentOrchestrator:
             elif tool.category == "INU_AI_KNOWLEDGE":
                 yield AgentStreamEvent(
                     event_type="STATUS",
-                    status_id="tool_knowledge",
+                    status_id=tool_id,
                     status_title=f"{tool_display_name} 검색 중...",
                     status_category="INU_AI_KNOWLEDGE",
                     status_state="running",
@@ -401,7 +462,7 @@ class AgentOrchestrator:
 
                 yield AgentStreamEvent(
                     event_type="STATUS",
-                    status_id="tool_knowledge",
+                    status_id=tool_id,
                     status_title=f"{tool_display_name} 검색 완료",
                     status_category="INU_AI_KNOWLEDGE",
                     status_state="completed",
@@ -429,7 +490,7 @@ class AgentOrchestrator:
             # Emit final thinking event before token generation
             yield AgentStreamEvent(
                 event_type="THINKING",
-                thinking="수집된 정보를 바탕으로 명확하고 친절한 답변을 작성하고 있습니다.",
+                thinking=generate_completion_thinking(pruned_tools),
             )
 
             async for token in llm_client.stream_chat(
