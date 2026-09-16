@@ -14,18 +14,22 @@ async def chat_stream(
     request: ChatRequest,
     req: Request,
     authorization: str = Header(default="", alias="Authorization"),
+    auth: str = Header(default="", alias="Auth"),
     x_appcenter_client: str = Header(default="", alias="X-AppCenter-Client"),
 ):
     # If header specifies client origin, override request client
     if x_appcenter_client:
         request.client = x_appcenter_client.upper()
 
-    if authorization:
+    raw_token = auth or authorization
+    if raw_token:
         if request.client_context is None:
             request.client_context = {}
-        request.client_context["authorization"] = authorization
+        clean_token = raw_token.replace("Bearer ", "").strip()
+        request.client_context["auth"] = clean_token
+        request.client_context["authorization"] = f"Bearer {clean_token}"
 
-    logger.info(f"Incoming chat request: '{request.message[:30]}...' from client: {request.client} (Auth: {bool(authorization)})")
+    logger.info(f"Incoming chat request: '{request.message[:30]}...' from client: {request.client} (Auth: {bool(raw_token)})")
 
     async def event_generator():
         try:

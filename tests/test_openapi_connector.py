@@ -88,6 +88,7 @@ def test_token_relay_and_execution():
             # Verify Token Relay in request headers
             _, kwargs = mock_get.call_args
             headers = kwargs.get("headers", {})
+            assert headers.get("Auth") == "sample_student_jwt_token_123"
             assert headers.get("Authorization") == "Bearer sample_student_jwt_token_123"
 
             # Verify response extraction

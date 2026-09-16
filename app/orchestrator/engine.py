@@ -83,8 +83,13 @@ class AgentOrchestrator:
             top_k=6,
         )
 
+        client_ctx = request.client_context or {}
+        raw_token = client_ctx.get("auth") or client_ctx.get("authorization", "")
+        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+
         exec_context = {
-            "authorization": (request.client_context or {}).get("authorization", ""),
+            "auth": clean_token,
+            "authorization": f"Bearer {clean_token}" if clean_token else "",
             "client": request.client,
             "query": request.message,
         }

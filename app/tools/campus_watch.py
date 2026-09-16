@@ -79,14 +79,13 @@ class CampusWatchTool(BaseTool):
 
     async def execute(self, arguments: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         action = str(arguments.get("action") or "WATCH").upper().strip()
-        auth_token = (context or {}).get("authorization", "")
-        if auth_token and not auth_token.startswith("Bearer "):
-            auth_token = f"Bearer {auth_token}"
+        raw_token = (context or {}).get("auth") or (context or {}).get("authorization", "")
+        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
 
         headers = {}
-        if auth_token:
-            headers["Authorization"] = auth_token
-            headers["Auth"] = auth_token
+        if clean_token:
+            headers["Auth"] = clean_token
+            headers["Authorization"] = f"Bearer {clean_token}"
 
         # 1. 감시 목록 조회
         if action == "LIST":
@@ -170,7 +169,7 @@ class CampusWatchTool(BaseTool):
         full_target_name = f"{target_name} {seat_no}번 좌석" if seat_no else target_name
         server_job_data = None
 
-        if auth_token:
+        if clean_token:
             try:
                 payload = {
                     "domain": domain,

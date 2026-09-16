@@ -61,20 +61,22 @@ class OpenApiTool(BaseTool):
 
         full_url = f"{base_url}{url_path}"
 
-        # 2. Token Relay: propagate incoming Authorization Bearer header
+        # 2. Token Relay: propagate incoming Auth & Authorization headers
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        auth_token = context.get("authorization")
-        if auth_token:
-            headers["Authorization"] = auth_token
+        raw_token = context.get("auth") or context.get("authorization", "")
+        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        if clean_token:
+            headers["Auth"] = clean_token
+            headers["Authorization"] = f"Bearer {clean_token}"
 
         if settings.INU_INTERNAL_S2S_SECRET:
             headers["X-Internal-Secret"] = settings.INU_INTERNAL_S2S_SECRET
 
-        logger.info(f"Executing OpenApiTool [{self.name}]: {self.method} {full_url} (Auth: {bool(auth_token)})")
+        logger.info(f"Executing OpenApiTool [{self.name}]: {self.method} {full_url} (Auth: {bool(clean_token)})")
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
