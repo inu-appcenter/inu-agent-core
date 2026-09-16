@@ -67,6 +67,43 @@ class InuAiKnowledgeTool(BaseTool):
             logger.error(f"InuChat request failed: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
+    async def stream_execute(self, params: Dict[str, Any], context: Optional[Dict[str, Any]] = None):
+        """
+        Stream response tokens directly from InuChat /inuchat/chat for 0ms latency direct pass-through.
+        Yields tuple: (token: str, is_done: bool, accumulated_text: str, citations: List[Dict[str, str]])
+        """
+        question = params.get("question") or (context or {}).get("query") or ""
+        if not question:
+            return
+
+        logger.info(f"Stream calling InuChat RAG Knowledge Tool for: '{question[:50]}'")
+        accumulated = []
+        try:
+            async with httpx.AsyncClient(timeout=40.0) as client:
+                async with client.stream(
+                    "POST",
+                    self.endpoint,
+                    json={"question": question, "history": []},
+                    headers={"X-Guest-Device-Id": "agent-core"},
+                ) as resp:
+                    if resp.status_code != 200:
+                        logger.warning(f"InuChat stream returned status {resp.status_code}")
+                        yield ("인천대학교 학사 규정 지식베이스를 조회하는 중 일시적인 지연이 발생했습니다.", True, "", [])
+                        return
+
+                    async for chunk in resp.aiter_text():
+                        if chunk:
+                            accumulated.append(chunk)
+                            yield (chunk, False, "".join(accumulated), [])
+
+            full_text = "".join(accumulated)
+            citations = self._extract_citations(full_text)
+            yield ("", True, full_text, citations)
+        except Exception as e:
+            logger.error(f"InuChat stream request failed: {e}", exc_info=True)
+            if not accumulated:
+                yield ("학사 규정 답변을 가져오는 중 일시적인 오류가 발생했습니다.", True, "", [])
+
     def _extract_citations(self, answer: str) -> List[Dict[str, str]]:
         citations = []
         seen = set()

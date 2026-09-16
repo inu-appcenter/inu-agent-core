@@ -138,8 +138,177 @@ class DynamicBusMatcher:
 
 class AgentRouter:
     """
-    Uses LLM to dynamically inspect OpenAPI parameters schema and extract arguments.
+    Uses LLM to dynamically inspect OpenAPI parameters schema, plan tools with real thoughts,
+    and execute autonomous ReAct chaining.
     """
+    @classmethod
+    async def decide_initial_plan(
+        cls,
+        query: str,
+        history: List[Any],
+        candidate_tools: List[BaseTool],
+    ) -> Dict[str, Any]:
+        """
+        Dynamically analyzes user intent, conversation context, and available candidate tools
+        to generate the AI's actual reasoning (Thought) and select the 1st-hop tools.
+        """
+        from datetime import datetime
+        now = datetime.now()
+        history_str = ""
+        if history:
+            h_lines = []
+            for h in history[-4:]:
+                role = getattr(h, "role", "user")
+                content = getattr(h, "content", "")
+                h_lines.append(f"- {role}: {content}")
+            history_str = "\n[최근 대화 흐름]:\n" + "\n".join(h_lines) + "\n"
+
+        tool_catalog = []
+        for t in candidate_tools:
+            tool_catalog.append(f"- {t.category} ({t.name}): {t.description}")
+        tool_catalog_str = "\n".join(tool_catalog)
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "thought": {
+                    "type": "string",
+                    "description": "사용자의 질문 의도와 필요한 캠퍼스 도구를 선별한 실제 판단 이유 (한두 문장, 구체적이고 자연스럽게)",
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "실행할 도구 카테고리 목록 (예: ['PORTAL'], ['BUS'], ['CAFETERIA'], ['INU_AI_KNOWLEDGE'] 등)",
+                },
+            },
+            "required": ["thought", "tools"],
+        }
+
+        system_msg = f"""당신은 인천대학교 캠퍼스 AI 비서 '챗불이'의 자율 오케스트레이터입니다.
+현재 시점: {now.year}년 {now.month}월 {now.day}일
+
+[핵심 지침]:
+1. 사용자의 질문 의도를 명확히 파악하고 필요한 도구들을 선별하세요.
+2. [1인칭 졸업/학사 판정 질의]:
+   '나 졸업 가능해?', '나 졸업 요건 돼?', '내 취득학점'처럼 1인칭으로 본인의 졸업/학점을 묻는 질문은,
+   학생 본인의 학적(소속 학과, 학번, 취득 학점) 확인이 필수적이므로 먼저 'PORTAL'을 반드시 포함하세요.
+3. [판단 이유 (thought) 작성 규칙]:
+   기계적인 템플릿 문구가 아니라, 질문에 등장한 대상(예: 정문 버스, 공학관 학식, 컴퓨터공학부 졸업 요건 등)을 직접 언급하며 실제 AI가 추론하는 자연스러운 문장으로 작성하세요.
+   - 예: '학우님의 졸업 가능 여부를 확인하기 위해 먼저 소속 학과와 취득 학점 등 학적 정보를 포털 시스템에서 조회합니다.'
+   - 예: '인천대 정문 정류소의 실시간 시내버스 도착 정보를 확인하고 있습니다.'
+   - 예: '오늘의 교내 학생식당 메뉴와 운영 현황을 조회하고 있습니다.'
+
+{history_str}
+[사용 가능한 도구 목록]:
+{tool_catalog_str}
+
+반드시 JSON 스키마 규격에 맞춰 응답하세요."""
+
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": query},
+        ]
+
+        try:
+            raw_json = await llm_client.create_guided_completion(
+                messages=messages,
+                response_schema=schema,
+                temperature=0.1,
+            )
+            parsed = json.loads(raw_json)
+            if isinstance(parsed, dict) and "thought" in parsed and "tools" in parsed:
+                return parsed
+        except Exception as e:
+            logger.warning(f"LLM initial plan decision failed, using fallback: {e}")
+
+        return {
+            "thought": f"'{query[:20]}...' 질문을 해결하기 위해 필요한 캠퍼스 시스템을 확인하고 있습니다.",
+            "tools": [t.category for t in candidate_tools[:2]],
+        }
+
+    @classmethod
+    async def decide_secondary_plan(
+        cls,
+        query: str,
+        history: List[Any],
+        current_observation: str,
+        executed_categories: List[str],
+        available_tools: List[BaseTool],
+    ) -> Dict[str, Any]:
+        """
+        ReAct Autonomous Chaining:
+        Examines current tool observations to decide if sufficient to answer.
+        If insufficient, selects next-hop tools and generates reasoning thought.
+        """
+        if not current_observation or not current_observation.strip():
+            return {"thought": "", "tools": []}
+
+        tool_catalog = []
+        for t in available_tools:
+            if t.category not in executed_categories:
+                tool_catalog.append(f"- {t.category} ({t.name}): {t.description}")
+
+        if not tool_catalog:
+            return {"thought": "필요한 정보가 모두 수집되어 답변을 작성합니다.", "tools": []}
+
+        tool_catalog_str = "\n".join(tool_catalog)
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "thought": {
+                    "type": "string",
+                    "description": "현재까지 수집된 결과를 평가하고 후속 조치나 최종 답변 작성을 결정한 구체적인 판단 이유",
+                },
+                "tools": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "추가로 실행해야 할 도구 카테고리 목록 (이미 충분하면 빈 배열 [])",
+                },
+            },
+            "required": ["thought", "tools"],
+        }
+
+        system_msg = f"""당신은 인천대학교 캠퍼스 AI 비서의 ReAct 자율 의사결정 엔진입니다.
+[사용자 질문]: "{query}"
+
+[현재까지 수집된 도구 실행 결과 (Observation)]:
+{current_observation}
+
+[이미 실행된 도구]: {', '.join(executed_categories)}
+
+[핵심 판단 기준]:
+1. 위 Observation 결과만으로 사용자 질문에 충분하고 정확하게 답변할 수 있는가?
+   - 충분하다면: "tools": []로 응답하고, thought에는 수집된 데이터를 바탕으로 명확한 답변을 준비한다는 이유를 작성하세요.
+2. 정보가 불충분하거나 후속 연계가 필요한 경우:
+   - [예시]: 사용자가 "나 졸업 가능해?"라고 물었고, 1단계에서 학생 학적(소속 학과, 학번, 취득학점)을 확인했으나 아직 학과의 '졸업 요건 규정'이 없는 경우:
+     -> tools: ["INU_AI_KNOWLEDGE"], thought: "학적 정보에서 소속 학과와 취득 학점을 확인했습니다. 졸업 가능 여부를 판정하기 위해 해당 학과의 졸업 요건 규정을 공식 학칙 지식베이스에서 추가로 조회합니다."
+   - 이미 실행된 도구는 중복 호출하지 마세요.
+
+[추가 실행 가능한 도구 목록]:
+{tool_catalog_str}
+
+반드시 JSON 스키마 규격에 맞춰 응답하세요."""
+
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": "현재까지의 관찰 결과를 바탕으로 후속 조치를 결정하세요."},
+        ]
+
+        try:
+            raw_json = await llm_client.create_guided_completion(
+                messages=messages,
+                response_schema=schema,
+                temperature=0.1,
+            )
+            parsed = json.loads(raw_json)
+            if isinstance(parsed, dict) and "thought" in parsed and "tools" in parsed:
+                return parsed
+        except Exception as e:
+            logger.warning(f"LLM secondary plan decision failed: {e}")
+
+        return {"thought": "", "tools": []}
+
     @classmethod
     async def extract_tool_arguments(
         cls,

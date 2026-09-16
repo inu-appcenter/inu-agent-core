@@ -242,11 +242,16 @@ class CardSynthesizer:
                 title = n.get("title") or "공지사항"
                 date_val = n.get("createDate") or n.get("date") or ""
                 cat = n.get("category") or n.get("subCategory") or "공지"
+                notice_url = n.get("url") or n.get("link")
+                if not notice_url and n.get("id"):
+                    notice_url = f"/notice/{n.get('id')}"
+
                 items.append(
                     ListItem(
                         title=str(title),
                         subtitle=str(date_val),
                         tag=str(cat),
+                        link=notice_url,
                     )
                 )
 
@@ -256,7 +261,7 @@ class CardSynthesizer:
         return ListCard(
             title="📢 인천대학교 최신 공지사항",
             items=items,
-            footer_text="상세 내용은 인천대학교 포털에서 확인하실 수 있습니다.",
+            footer_text="공지사항을 클릭하면 상세 내용으로 연결됩니다.",
         )
 
     @classmethod
