@@ -15,6 +15,12 @@ from app.rules.registry import action_rule_registry
 from app.tools.inuchat import InuAiKnowledgeTool
 from app.tools.library import LibrarySeatTool
 from app.tools.campus_watch import CampusWatchTool
+from app.tools.notification_tools import (
+    ManageReminderTool,
+    DailyBriefTool,
+    NoticeKeywordTool,
+    MySettingsTool,
+)
 
 class ToolRegistry:
     def __init__(self):
@@ -85,9 +91,14 @@ class ToolRegistry:
         self.register(LibrarySeatTool())
         # 3. Register Campus Watch / Seat Sniper Tool
         self.register(CampusWatchTool())
-        # 4. Register Client Action Tools
+        # 4. Register Notification & Settings Tools
+        self.register(ManageReminderTool())
+        self.register(DailyBriefTool())
+        self.register(NoticeKeywordTool())
+        self.register(MySettingsTool())
+        # 5. Register Client Action Tools
         self.register_client_action_rules()
-        # 5. Register OpenAPI Tools
+        # 6. Register OpenAPI Tools
         await self.sync_inu_portal_tools()
 
 

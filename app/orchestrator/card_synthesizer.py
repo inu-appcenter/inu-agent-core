@@ -63,6 +63,14 @@ class CardSynthesizer:
             return cls._build_campus_watch_card(data)
         elif domain in ["INU_AI_KNOWLEDGE", "INU_AI", "CITATION"]:
             return cls._build_inuchat_citation_card(data)
+        elif domain in ["REMINDER", "NOTIFICATION"] or "reminder" in tool_name.lower():
+            return cls._build_reminder_card(data)
+        elif domain in ["DAILY_BRIEF", "BRIEF"] or "daily_brief" in tool_name.lower():
+            return cls._build_daily_brief_card(data)
+        elif domain in ["KEYWORD", "NOTICE_KEYWORD"] or "keyword" in tool_name.lower():
+            return cls._build_keyword_card(data)
+        elif domain in ["SETTINGS", "MY_SETTINGS"] or "settings" in tool_name.lower():
+            return cls._build_settings_card(data)
 
         return None
 
@@ -677,4 +685,48 @@ class CardSynthesizer:
             title=f"실시간 빈자리 감시 시작 ({target_name})",
             data=inner_data or {"targetName": target_name, "remainingMinutes": remaining},
             link=CardLink(label="감시 현황 확인하기", route="/mypage/notification/smart-watch"),
+        )
+
+    @classmethod
+    def _build_reminder_card(cls, data: Optional[Any] = None) -> Optional[ComponentCard]:
+        if not data:
+            return None
+        return ComponentCard(
+            type="AGENT_REMINDER_SETTING",
+            title="⏰ AI 맞춤 알림 관리",
+            data=data if isinstance(data, dict) else {"reminders": data},
+            link=CardLink(label="맞춤 알림 관리", route="/mypage/notification/reminder"),
+        )
+
+    @classmethod
+    def _build_daily_brief_card(cls, data: Optional[Any] = None) -> Optional[ComponentCard]:
+        if not data:
+            return None
+        return ComponentCard(
+            type="DAILY_BRIEF_SETTING",
+            title="🌅 데일리 브리프 아침 알림",
+            data=data if isinstance(data, dict) else {},
+            link=CardLink(label="데일리 브리프 설정", route="/mypage/notification/daily-brief"),
+        )
+
+    @classmethod
+    def _build_keyword_card(cls, data: Optional[Any] = None) -> Optional[ComponentCard]:
+        if not data:
+            return None
+        return ComponentCard(
+            type="KEYWORD_SETTING",
+            title="🔔 공지사항 키워드 알림",
+            data=data if isinstance(data, dict) else {"keywords": data},
+            link=CardLink(label="키워드 알림 관리", route="/mypage/notification/keyword"),
+        )
+
+    @classmethod
+    def _build_settings_card(cls, data: Optional[Any] = None) -> Optional[ComponentCard]:
+        if not data:
+            return None
+        return ComponentCard(
+            type="MY_SETTINGS_OVERVIEW",
+            title="⚙️ 나의 맞춤 알림 종합 설정",
+            data=data if isinstance(data, dict) else {},
+            link=CardLink(label="전체 알림 설정", route="/mypage/notification"),
         )

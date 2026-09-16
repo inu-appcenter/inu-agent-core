@@ -35,6 +35,10 @@ def resolve_tool_display_name(category: str, name: str) -> str:
         "DIRECTORY": "교내 부서/학과 연락처",
         "WEATHER": "캠퍼스 날씨 정보",
         "INU_AI_KNOWLEDGE": "인천대학교 학칙·규정 지식베이스",
+        "REMINDER": "맞춤 푸시 알림 예약 및 관리",
+        "DAILY_BRIEF": "데일리 브리프 아침 일정 설정",
+        "KEYWORD": "공지사항 키워드 알림 구독",
+        "SETTINGS": "내 맞춤 알림 및 브리프 설정 종합",
     }
     if category in category_map:
         return category_map[category]
@@ -229,7 +233,10 @@ class AgentOrchestrator:
 
         # 4. Step 3: Response Streaming Strategy
         # Case 1: Pure Academic Regulation / Graduation query -> INUChat Direct Pass-through
-        other_campus_domains = {"BUS", "CAFETERIA", "TIMETABLE", "WEATHER", "LIBRARY", "DIRECTORY", "CAMPUS_WATCH"}
+        other_campus_domains = {
+            "BUS", "CAFETERIA", "TIMETABLE", "WEATHER", "LIBRARY", "DIRECTORY", "CAMPUS_WATCH",
+            "REMINDER", "DAILY_BRIEF", "KEYWORD", "SETTINGS"
+        }
         has_other_campus_tools = bool(executed_categories.intersection(other_campus_domains))
         has_inuchat = "INU_AI_KNOWLEDGE" in executed_categories or inuchat_rag_data is not None
 
@@ -515,7 +522,7 @@ class AgentOrchestrator:
             )
 
         # Case B: Server OpenAPI / Direct Tools
-        elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY", "CAMPUS_WATCH"]:
+        elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY", "CAMPUS_WATCH", "REMINDER", "DAILY_BRIEF", "KEYWORD", "SETTINGS"]:
             if tool.category == "DIRECTORY":
                 query_intent_keywords = ["전화", "연락처", "번호", "과사", "사무실", "교수님", "교수", "위치", "호실", "문의", "연구실"]
                 has_contact_intent = any(k in request.message.lower() for k in query_intent_keywords)
@@ -630,6 +637,18 @@ class AgentOrchestrator:
                                 f"{json.dumps(classes, ensure_ascii=False)[:1000]}\n"
                                 f"💡 지침: 학생에게 오늘 수업 시간과 강의실을 명확히 안내하고, 하단의 [나의 수업 시간표] 카드에서 전체 시간표를 확인할 수 있다고 덧붙이세요.\n"
                             )
+                    elif tool.category == "REMINDER":
+                        tool_data = res
+                        summary_out = f"\n[AI 맞춤 알림(리마인더) 처리 결과]:\n{json.dumps(res, ensure_ascii=False)}\n💡 지침: 알림 등록/수정/삭제/조회 결과를 사용자에게 친절하고 명확하게 안내하세요.\n"
+                    elif tool.category == "DAILY_BRIEF":
+                        tool_data = res
+                        summary_out = f"\n[데일리 브리프 아침 일정 설정 결과]:\n{json.dumps(res, ensure_ascii=False)}\n💡 지침: 데일리 브리프 시간 및 활성화 설정 상태를 친절히 안내하세요.\n"
+                    elif tool.category == "KEYWORD":
+                        tool_data = res
+                        summary_out = f"\n[공지사항 키워드 알림 구독 결과]:\n{json.dumps(res, ensure_ascii=False)}\n💡 지침: 공지 키워드 등록/조회/삭제 결과를 사용자에게 명확히 안내하세요.\n"
+                    elif tool.category == "SETTINGS":
+                        tool_data = res
+                        summary_out = f"\n[내 맞춤 알림 및 브리프 종합 설정]:\n{json.dumps(res, ensure_ascii=False)}\n💡 지침: 등록된 키워드, 맞춤 알림, 데일리 브리프 설정을 일목요연하게 정리해 안내하세요.\n"
                     else:
                         tool_data = res
                         summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
