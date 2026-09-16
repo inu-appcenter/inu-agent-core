@@ -558,23 +558,18 @@ class CardSynthesizer:
 
     @classmethod
     def _build_portal_auth_card(cls) -> ComponentCard:
-        """포털 계정 1회 연동 안내 카드 (PortalAuthRequiredCard)"""
+        """포털 계정 연동 안내 카드 (PortalAuthRequiredCard) - 포털, 이러닝(LMS), 도서관 공통 1회 연동"""
         return ComponentCard(
             type="PORTAL_AUTH_REQUIRED",
-            title="포털 계정 1회 연동이 필요해요",
+            title="포털 계정 연동이 필요해요",
             data={},
             link=CardLink(label="포털 계정 연동하기", route="/mypage"),
         )
 
     @classmethod
     def _build_lms_auth_card(cls) -> ComponentCard:
-        """사이버캠퍼스(LMS) 계정 1회 연동 안내 카드 (LmsAuthRequiredCard)"""
-        return ComponentCard(
-            type="LMS_AUTH_REQUIRED",
-            title="사이버캠퍼스(LMS) 연동이 필요해요",
-            data={},
-            link=CardLink(label="LMS 계정 연동하기", route="/mypage"),
-        )
+        """이러닝(LMS) 및 포털 공통 계정 연동 카드"""
+        return cls._build_portal_auth_card()
 
     @classmethod
     def _build_campus_watch_card(cls, data: Optional[Any] = None) -> Optional[ComponentCard]:

@@ -39,10 +39,12 @@ def test_auth_required_card_synthesis():
     portal_card = CardSynthesizer.synthesize_for_domain("PORTAL", data="AUTH_REQUIRED")
     assert portal_card is not None
     assert portal_card.type == "PORTAL_AUTH_REQUIRED"
+    assert portal_card.title == "포털 계정 연동이 필요해요"
 
     lms_card = CardSynthesizer.synthesize_for_domain("LMS", data="AUTH_REQUIRED")
     assert lms_card is not None
-    assert lms_card.type == "LMS_AUTH_REQUIRED"
+    assert lms_card.type == "PORTAL_AUTH_REQUIRED"
+    assert lms_card.title == "포털 계정 연동이 필요해요"
 
 def test_campus_watch_card_synthesis():
     card = CardSynthesizer.synthesize_for_domain(
