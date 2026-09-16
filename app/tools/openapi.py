@@ -143,7 +143,9 @@ class OpenApiConnector:
                     continue
 
                 op_id = op.get("operationId") or self._generate_op_id(method, path)
-                summary = op.get("summary") or op.get("description") or f"API for {path}"
+                summary = (op.get("summary") or op.get("description") or f"API for {path}").strip()
+                detail_desc = (op.get("description") or "").strip()
+
                 tags = op.get("tags", [])
                 category = self._infer_category(path, tags)
 
@@ -164,6 +166,7 @@ class OpenApiConnector:
                     category=category,
                     requires_auth=requires_auth,
                 )
+                tool.detail_desc = detail_desc
                 tools.append(tool)
 
         logger.info(f"Parsed {len(tools)} OpenApiTools from OpenAPI specification")

@@ -14,7 +14,7 @@ from app.orchestrator.prompts import (
     is_out_of_scope_question,
     OUT_OF_SCOPE_REFUSAL_MESSAGE,
 )
-from app.orchestrator.pruner import ToolPruner
+from app.orchestrator.retriever import tool_retriever
 from app.orchestrator.card_synthesizer import CardSynthesizer
 from app.orchestrator.router import AgentRouter
 from app.tools.registry import tool_registry
@@ -23,7 +23,7 @@ from app.tools.registry import tool_registry
 class AgentOrchestrator:
     async def run_stream(self, request: ChatRequest) -> AsyncGenerator[AgentStreamEvent, None]:
         """
-        Execute streaming chat with intent handling, tool pruning, and SSE events.
+        Execute streaming chat with intent handling, semantic tool retrieval, and SSE events.
         """
         # 0. Out-of-scope hard guardrail (Coding, pure math, unrelated universities)
         if is_out_of_scope_question(request.message):
@@ -32,14 +32,14 @@ class AgentOrchestrator:
             yield AgentStreamEvent(event_type="DONE")
             return
 
-        # 1. Tool Pruning: select top 3-4 most relevant tools from registry with multi-turn context
-        all_tools = tool_registry.list_tools()
-        pruned_tools = ToolPruner.prune(
+        # 1. Semantic Tool Retrieval: select top 3-4 most relevant tools via In-Memory Tool RAG
+        if not tool_retriever.is_indexed:
+            await tool_retriever.index_tools(tool_registry.list_tools())
+
+        pruned_tools = await tool_retriever.retrieve(
             query=request.message,
-            tools=all_tools,
             history=request.history,
-            client=request.client,
-            max_tools=4,
+            top_k=4,
         )
 
         # Context for tool execution (Token Relay)

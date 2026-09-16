@@ -6,6 +6,7 @@ from app.core.config import settings
 from app.core.logging import setup_logging, logger
 from app.api.v1.router import api_v1_router
 from app.tools.registry import tool_registry
+from app.orchestrator.retriever import tool_retriever
 
 
 @asynccontextmanager
@@ -19,6 +20,10 @@ async def lifespan(app: FastAPI):
     try:
         await tool_registry.initialize_all_tools()
         logger.info(f"Tool registry initialized with {len(tool_registry.list_tools())} active tools.")
+
+        # Index all tools into In-Memory Semantic Tool Retriever (Tool RAG)
+        indexed_count = await tool_retriever.index_tools(tool_registry.list_tools())
+        logger.info(f"Semantic tool retriever indexed {indexed_count} active tools into in-memory vector store.")
     except Exception as e:
         logger.error(f"Error during tool registry initialization: {e}", exc_info=True)
 

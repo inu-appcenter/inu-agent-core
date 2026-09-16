@@ -27,6 +27,20 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 2048
     LLM_TIMEOUT_SECONDS: float = 60.0
 
+    # Semantic Tool Retriever & Embeddings
+    EMBEDDING_BACKEND: str = Field(
+        default="fastembed",
+        description="Embedding backend: 'fastembed' (in-process ONNX), 'openai' (HTTP), or 'mock' (tests)",
+    )
+    EMBEDDING_MODEL_NAME: str = Field(
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        description="FastEmbed or OpenAI embedding model name",
+    )
+    EMBEDDING_SIMILARITY_THRESHOLD: float = Field(
+        default=0.25,
+        description="Minimum cosine similarity threshold to retrieve tools",
+    )
+
     # Redis Cache & Session
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
