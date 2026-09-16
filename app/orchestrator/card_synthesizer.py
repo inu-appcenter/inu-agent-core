@@ -102,6 +102,7 @@ class CardSynthesizer:
                             title=route_display,
                             subtitle=sub,
                             tag="실시간 도착",
+                            link="/bus",
                         )
                     )
         elif valid_routes:
@@ -112,6 +113,7 @@ class CardSynthesizer:
                         title=r_display,
                         subtitle="현재 운행 대기 또는 도착 정보 없음",
                         tag="운행 정보",
+                        link="/bus",
                     )
                 )
 
