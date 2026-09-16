@@ -57,8 +57,6 @@ def test_library_card_synthesis():
         query="도서관 좌석 남아있어?",
     )
     assert card is not None
-    assert card.card_type == "LIST_CARD"
-    assert "열람실 좌석 현황" in card.title
-    assert len(card.items) == 2
-    assert card.items[0].tag == "여유"
-    assert card.items[1].tag == "혼잡"
+    assert card.card_type == "COMPONENT_CARD"
+    assert card.type == "LIBRARY_ROOMS"
+    assert len(card.data.get("rooms", [])) == 2

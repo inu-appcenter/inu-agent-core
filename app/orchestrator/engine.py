@@ -230,18 +230,45 @@ class AgentOrchestrator:
                                     f"- 현재 해당 정류소에 운행 대기 중이거나 도착 예정인 인팁 서비스 대상 버스({', '.join(valid_routes)})가 없습니다.\n"
                                     f"- [엄격 지침]: 인팁 프론트엔드에서 공식 서비스하지 않는 일반 시내/광역 버스(예: M6464 등)는 절대로 답변에 언급하지 마십시오. 서비스 대상 노선({', '.join(valid_routes)}) 중 현재 도착 정보가 없음을 사실대로 친절히 안내하세요.\n"
                                 )
-                        elif tool.category == "LIBRARY" and isinstance(res, dict) and "rooms" in res:
+                        elif tool.category == "LIBRARY" and isinstance(res, dict):
                             tool_data = res
-                            rooms_info = "\n".join([
-                                f"- {r['name']}: 잔여 {r['available_seats']}석 / 전체 {r['total_seats']}석 (사용 중: {r['occupied_seats']}석, 이용률 {r['utilization_rate']})"
-                                for r in res.get("rooms", [])
-                            ])
-                            tool_summary_text += (
-                                f"\n[인천대학교 학술정보관(도서관) 열람실 실시간 좌석 현황]:\n"
-                                f"{rooms_info}\n"
-                                f"- [응답 지침]: 위 실시간 잔여 좌석 데이터를 바탕으로 사용자에게 열람실별 현재 잔여 좌석 수와 여유/혼잡 상태를 친절하고 정확하게 안내하세요.\n"
-                                f"- [금지 사항]: INTIP 앱 내에 존재하지 않는 가상의 '도서관 메뉴'나 '예약 버튼'을 누르라고 거짓 안내하지 마십시오. 열람실 좌석 배정 및 스터디룸 예약은 학술정보관 공식 모바일 웹(https://lib.inu.ac.kr) 또는 학술정보관 현장 키오스크를 통해 진행할 수 있음을 안내하세요.\n"
-                            )
+                            mode = res.get("mode", "SEATS")
+                            if mode == "RESERVE_SEAT":
+                                seat_info = res.get("data", {})
+                                r_name = seat_info.get("roomName", "열람실")
+                                s_no = f"{seat_info.get('seatNo')}번 " if seat_info.get("seatNo") else ""
+                                tool_summary_text += (
+                                    f"\n[학산도서관 열람실 좌석 배정 신청]:\n"
+                                    f"- 대상: {r_name} {s_no}좌석\n"
+                                    f"- 대화창에 [학산도서관 좌석 배정 확인 카드]가 준비되었습니다.\n"
+                                    f"- [핵심 응답 지침]: 사용자에게 대화창 아래 카드에서 좌석 상태를 확인하신 후 [확인 및 배정 신청하기] 버튼을 누르면 기기(INTIP 앱)에서 도서관 시스템에 즉시 배정을 완료한다고 친절하게 안내하세요.\n"
+                                    f"- [절대 금지]: '예약은 학생이 웹사이트나 키오스크에서 직접 하라'고 안내하지 마십시오. 대화창 카드의 버튼 클릭으로 앱이 즉시 배정을 완료합니다.\n"
+                                )
+                            elif mode == "RESERVE_STUDY_ROOM":
+                                study_info = res.get("data", {})
+                                tool_summary_text += (
+                                    f"\n[학산도서관 스터디룸 예약 신청]:\n"
+                                    f"- 대상: {study_info.get('roomName', '스터디룸')}\n"
+                                    f"- 대화창에 [학산도서관 스터디룸 예약 확인 카드]가 준비되었습니다.\n"
+                                    f"- [핵심 응답 지침]: 사용자에게 아래 카드에서 예약 정보를 확인하고 [확인 및 예약 신청하기] 버튼을 누르면 기기에서 즉시 예약이 완료된다고 안내하세요.\n"
+                                )
+                            elif mode == "STUDY_ROOMS":
+                                tool_summary_text += (
+                                    f"\n[학산도서관 스터디룸 목록]:\n"
+                                    f"- 대화창에 스터디룸 목록 카드가 준비되었습니다.\n"
+                                    f"- [응답 지침]: 원하는 스터디룸을 터치하면 바로 예약 신청이 가능함을 안내하세요.\n"
+                                )
+                            else:
+                                rooms_info = "\n".join([
+                                    f"- {r['name']}: 잔여 {r.get('available_seats', r.get('seats', {}).get('available', 0))}석 / 전체 {r.get('total_seats', r.get('seats', {}).get('total', 0))}석"
+                                    for r in res.get("rooms", [])
+                                ])
+                                tool_summary_text += (
+                                    f"\n[학산도서관 열람실 실시간 잔여 좌석 현황]:\n"
+                                    f"{rooms_info}\n"
+                                    f"- [핵심 응답 지침]: 위 실시간 잔여 좌석을 친절하게 브리핑하고, 대화창 아래 카드에서 원하는 열람실을 터치하면 바로 좌석 선택 및 배정 신청 화면으로 연결된다고 안내하세요.\n"
+                                    f"- [절대 금지]: '예약은 웹사이트나 키오스크에서 직접 하라'고 하지 마십시오. 대화창 카드를 터치하여 바로 좌석을 배정받을 수 있습니다.\n"
+                                )
                         else:
                             tool_data = res
                             logger.info(f"Successfully executed tool: {tool.name} with dynamic args {tool_args}")

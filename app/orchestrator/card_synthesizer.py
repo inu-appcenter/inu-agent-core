@@ -13,6 +13,8 @@ from app.llm.schemas import (
     MetricCardItem,
     StatusCard,
     CardBadge,
+    ComponentCard,
+    CardLink,
 )
 from app.core.logging import logger
 
@@ -282,15 +284,23 @@ class CardSynthesizer:
             return None
 
     @classmethod
-    def _build_lms_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+    def _build_lms_card(cls, data: Optional[Any] = None) -> Optional[GenerativeCard]:
         if not data:
             return None
+
+        # INTIP 웹 전용 고유 대화형 카드 (LmsAssignmentsCard) 우선 생성
+        if isinstance(data, dict) and ("events" in data or "assignments" in data or "courses" in data):
+            return ComponentCard(
+                type="LMS_ASSIGNMENTS",
+                data=data,
+                link=CardLink(label="사이버캠퍼스 바로가기", route="https://lms.inu.ac.kr"),
+            )
+
         items: List[ListItem] = []
         events = []
         courses = []
         if isinstance(data, dict):
             events = data.get("events") or data.get("assignments") or []
-            courses = data.get("courses") or []
         elif isinstance(data, list):
             events = data
 
@@ -425,88 +435,48 @@ class CardSynthesizer:
         )
 
     @classmethod
-    def _build_library_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+    def _build_library_card(cls, data: Optional[Any] = None) -> Optional[GenerativeCard]:
         if not data:
             return None
-        items: List[ListItem] = []
+
+        # 1. INTIP 전용 대화형 컴포넌트 카드 우선 생성
+        if isinstance(data, dict):
+            comp_type = data.get("component_type")
+            if comp_type:
+                comp_data = data.get("data") or {}
+                link_info = data.get("link") or {"label": "학산도서관 좌석 배정", "route": "/services/library"}
+                return ComponentCard(
+                    type=comp_type,
+                    data=comp_data,
+                    link=CardLink(label=link_info.get("label", "도서관"), route=link_info.get("route", "/services/library")),
+                )
+
+        # 2. 열람실 잔여 좌석 목록 컴포넌트 카드 (LIBRARY_ROOMS)
         raw_rooms = []
         if isinstance(data, dict):
             raw_rooms = data.get("rooms") or data.get("list") or []
         elif isinstance(data, list):
             raw_rooms = data
 
-        for room in raw_rooms[:6]:
-            if not isinstance(room, dict):
-                continue
-            name = room.get("name") or "열람실"
-            available = room.get("available_seats")
-            total = room.get("total_seats")
-            if available is None and "seats" in room and isinstance(room["seats"], dict):
-                available = room["seats"].get("available", 0)
-                total = room["seats"].get("total", 0)
-
-            total = total or 0
-            available = available or 0
-            occupied = total - available
-
-            rate = round((occupied / total * 100), 1) if total > 0 else 0.0
-
-            if available == 0 and total > 0:
-                tag = "만석"
-            elif rate >= 80:
-                tag = "혼잡"
-            elif rate >= 50:
-                tag = "보통"
-            else:
-                tag = "여유"
-
-            items.append(
-                ListItem(
-                    title=str(name),
-                    subtitle=f"잔여 {available}석 / 전체 {total}석 (이용률 {rate}%)",
-                    tag=tag,
-                    link="https://lib.inu.ac.kr",
-                )
+        if raw_rooms:
+            # INTIP 고유 LibraryRoomsCard 규격 지원 (터치 시 좌석 선택 및 배정 연결)
+            return ComponentCard(
+                type="LIBRARY_ROOMS",
+                data={"rooms": raw_rooms},
+                link=CardLink(label="학산도서관 좌석 배정", route="/services/library"),
             )
 
-        if not items:
-            return None
-
-        return ListCard(
-            title="📚 학술정보관 열람실 좌석 현황",
-            items=items,
-            footer_text="인천대학교 학술정보관 실시간 좌석 배정 시스템 기준",
-        )
+        return None
 
     @classmethod
-    def _build_academic_card(cls, data: Optional[Any] = None) -> Optional[MetricCard]:
+    def _build_academic_card(cls, data: Optional[Any] = None) -> Optional[GenerativeCard]:
         if not data or not isinstance(data, dict):
             return None
-        dept = data.get("departmentName") or data.get("deptName") or "학과 정보 없음"
-        colg = data.get("collegeName") or ""
-        status = data.get("enrollmentStatus") or "재학"
-        sem = data.get("completedSemesterCount") or ""
-        credits = data.get("acquiredCredits") or "0"
-        gpa = data.get("gradeAverage") or "--"
-        entry = data.get("entryYear") or (data.get("studentId", "")[:4] if data.get("studentId") else "")
-        entry_str = f"{entry}학번" if entry else "학번 정보 없음"
 
-        sub_details = [
-            MetricCardItem(label="학적 상태", value=f"{status}" + (f" ({sem})" if sem else "")),
-            MetricCardItem(label="취득 학점", value=f"{credits}학점"),
-            MetricCardItem(label="평점 평균", value=f"{gpa}"),
-            MetricCardItem(label="입학 정보", value=entry_str),
-        ]
-
-        return MetricCard(
-            title="🎓 나의 학적 및 학점 정보",
-            main_metric=MetricCardItem(
-                label="소속 학과",
-                value=f"{colg} {dept}".strip(),
-            ),
-            sub_details=sub_details,
-            footer_text="인천대학교 포털 종합정보시스템(ERP) 실시간 연동 기준",
+        # 1. INTIP 전용 학적 카드 컴포넌트 (AcademicInfoCard) 우선 생성
+        # 사용자 본인에게 표시할 전체 학적 데이터 규격을 그대로 전달하여 UI 렌더링
+        return ComponentCard(
+            type="ACADEMIC_INFO",
+            data=data,
+            link=CardLink(label="학적 정보 상세보기", route="/mypage"),
         )
-
-
-

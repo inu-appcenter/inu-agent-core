@@ -118,8 +118,23 @@ class ActionCard(BaseModel):
     action_payload: Dict[str, Any]
 
 
+class CardLink(BaseModel):
+    label: str
+    route: str
+
+
+class ComponentCard(BaseModel):
+    """
+    Dedicated Interactive Component Card for INTIP UI (LIBRARY_SEAT_CONFIRM, LIBRARY_ROOMS, ACADEMIC_INFO, etc.)
+    """
+    card_type: Literal["COMPONENT_CARD"] = "COMPONENT_CARD"
+    type: str
+    data: Dict[str, Any] = Field(default_factory=dict)
+    link: Optional[CardLink] = None
+
+
 # Union type for all supported Cards
-GenerativeCard = Union[MetricCard, StatusCard, ListCard, ActionCard]
+GenerativeCard = Union[MetricCard, StatusCard, ListCard, ActionCard, ComponentCard]
 
 
 # -----------------------------------------------------------------------------
