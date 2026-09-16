@@ -139,7 +139,7 @@ class CardSynthesizer:
         items: List[ListItem] = []
         for cit in citations[:4]:
             if isinstance(cit, dict):
-                title = cit.get("title", "관련 학칙/원문 바로가기")
+                title = cit.get("title") or "인천대학교 공식 공지/학칙 원문"
                 url = cit.get("url", "https://www.inu.ac.kr")
                 tag = "공식학칙" if cit.get("type") == "LAW" else "공지출처"
                 items.append(
@@ -476,10 +476,45 @@ class CardSynthesizer:
         if not data or not isinstance(data, dict):
             return None
 
+        # 프론트엔드/모바일/웹의 다양한 프로퍼티 명(카멜, 축약형 등)을 모두 지원하도록 정규화
+        name = data.get("koreanName") or data.get("name") or data.get("studentName") or data.get("korNm") or "학우님"
+        student_id = data.get("studentId") or data.get("id") or data.get("stdNo") or (f"{data.get('entryYear')}학번" if data.get("entryYear") else "")
+        dept = data.get("departmentName") or data.get("department") or data.get("dept") or data.get("major") or data.get("deptName") or ""
+        college = data.get("collegeName") or data.get("colgNm") or ""
+        status = data.get("enrollmentStatus") or data.get("status") or data.get("academicStatus") or "재학"
+        change = data.get("latestEnrollmentChange") or data.get("flSchregModGbn") or ""
+        semester = data.get("completedSemesterCount") or data.get("completedSemesterName") or (f"{data.get('grade')}학년" if data.get("grade") else "")
+        credits = data.get("acquiredCredits") or data.get("totalCredits") or data.get("credits") or ""
+        gpa = data.get("gradeAverage") or data.get("gpa") or data.get("mrksAvg") or ""
+        advisor = data.get("advisorProfessorName") or data.get("advisor") or data.get("profNm") or ""
+
+        normalized_data = {
+            **data,
+            # 표준 카멜케이스
+            "koreanName": name,
+            "studentId": student_id,
+            "departmentName": dept,
+            "collegeName": college,
+            "enrollmentStatus": status,
+            "latestEnrollmentChange": change,
+            "completedSemesterCount": semester,
+            "acquiredCredits": credits,
+            "gradeAverage": gpa,
+            "advisorProfessorName": advisor,
+            # 프론트엔드 축약형 호환
+            "name": name,
+            "department": dept,
+            "status": status,
+            "credits": credits,
+            "totalCredits": credits,
+            "grade": semester,
+            "advisor": advisor,
+        }
+
         # INTIP 전용 학적 카드 컴포넌트 (AcademicInfoCard) 생성
         return ComponentCard(
             type="ACADEMIC_INFO",
             title="학적 기본 정보",
-            data=data,
+            data=normalized_data,
             link=CardLink(label="학적 정보 상세보기", route="/mypage"),
         )

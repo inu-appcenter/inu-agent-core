@@ -176,6 +176,13 @@ class SemanticToolRetriever:
 
         # Sort by total score descending
         scored_tools.sort(key=lambda x: x[0], reverse=True)
+
+        # Dynamic Relevance Cutoff: 1위 도구 점수가 높을 때(>= 0.6), 격차가 큰 저점수 도구 제외
+        if scored_tools:
+            top_score = scored_tools[0][0]
+            cutoff = max(min_threshold, top_score * 0.55) if top_score >= 0.6 else min_threshold
+            scored_tools = [item for item in scored_tools if item[0] >= cutoff]
+
         selected = [t for _, t in scored_tools[:top_k]]
 
         logger.debug(
@@ -227,6 +234,12 @@ class SemanticToolRetriever:
                 scored_tools.append((total_score, tool))
 
         scored_tools.sort(key=lambda x: x[0], reverse=True)
+
+        if scored_tools:
+            top_score = scored_tools[0][0]
+            cutoff = max(min_threshold, top_score * 0.55) if top_score >= 0.6 else min_threshold
+            scored_tools = [item for item in scored_tools if item[0] >= cutoff]
+
         return [t for _, t in scored_tools[:top_k]]
 
 

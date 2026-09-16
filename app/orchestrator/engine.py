@@ -69,22 +69,33 @@ class AgentOrchestrator:
                     # Actual client context provided (e.g. from mobile app SSO)
                     logger.info(f"Using provided client_context for domain {tool.category}")
                     if tool.category == "PORTAL" and isinstance(domain_data, dict):
-                        dept = domain_data.get("departmentName") or domain_data.get("deptName") or ""
-                        colg = domain_data.get("collegeName") or ""
-                        status = domain_data.get("enrollmentStatus") or ""
-                        sem = domain_data.get("completedSemesterCount") or ""
-                        credits = domain_data.get("acquiredCredits") or ""
-                        gpa = domain_data.get("gradeAverage") or ""
-                        entry = domain_data.get("entryYear") or (domain_data.get("studentId", "")[:4] if domain_data.get("studentId") else "")
-                        name = domain_data.get("koreanName") or "학우"
+                        # academicDisplay가 있으면 우선 결합하여 전체 상세 정보 확보
+                        display_data = client_ctx.get("academicDisplay")
+                        merged_portal_data = {**domain_data, **(display_data if isinstance(display_data, dict) else {})}
+
+                        dept = merged_portal_data.get("departmentName") or merged_portal_data.get("deptName") or ""
+                        colg = merged_portal_data.get("collegeName") or ""
+                        status = merged_portal_data.get("enrollmentStatus") or ""
+                        change = merged_portal_data.get("latestEnrollmentChange") or ""
+                        sem = merged_portal_data.get("completedSemesterCount") or ""
+                        credits = merged_portal_data.get("acquiredCredits") or ""
+                        gpa = merged_portal_data.get("gradeAverage") or ""
+                        entry = merged_portal_data.get("entryYear") or (merged_portal_data.get("studentId", "")[:4] if merged_portal_data.get("studentId") else "")
+                        name = merged_portal_data.get("koreanName") or "학우"
+                        advisor = merged_portal_data.get("advisorProfessorName") or merged_portal_data.get("profNm") or ""
+
+                        status_display = status
+                        if change and change != status:
+                            status_display = f"{status} ({change})"
 
                         tool_summary_text += (
                             f"\n[포털 종합정보(ERP) 학생 실제 학적 연동 데이터]:\n"
                             f"- 성명/소속: {name}님 ({colg} {dept})\n"
-                            f"- 학적 상태: {status}" + (f" (이수 학기: {sem})" if sem else "") + "\n"
+                            f"- 학적 상태: {status_display}" + (f" (이수 학기: {sem})" if sem else "") + "\n"
                             f"- 취득 학점: {credits}학점 (평점 평균: {gpa})\n"
                             f"- 입학 정보: {entry}학번\n"
-                            f"- [응답 지침]: 위 연동된 실제 학적 및 학점 데이터를 바탕으로 학생의 질문에 정확하고 친절하게 답변하세요.\n"
+                            + (f"- 지도교수: {advisor} 교수님\n" if advisor else "")
+                            + f"- [응답 지침]: 위 연동된 실제 학적 및 학점 데이터를 바탕으로 학생의 질문에 정확하고 친절하게 답변하세요.\n"
                         )
                     elif tool.category == "LMS" and isinstance(domain_data, (dict, list)):
                         events = []
@@ -133,10 +144,11 @@ class AgentOrchestrator:
                         tool_summary_text += f"\n[{tool.category} 실제 학생 연동 데이터]:\n{json.dumps(domain_data, ensure_ascii=False)[:1000]}\n"
 
                     if tool.category not in emitted_cards:
+                        card_source = (client_ctx.get("academicDisplay") or domain_data) if tool.category == "PORTAL" else domain_data
                         card = CardSynthesizer.synthesize_for_domain(
                             domain=tool.category,
                             tool_name=tool.name,
-                            data=domain_data,
+                            data=card_source,
                             query=request.message,
                         )
                         if card:
@@ -189,12 +201,27 @@ class AgentOrchestrator:
 
             # Case B: Server OpenAPI / Direct Tools (Cafeteria, Bus, Timetable, Notices, Schedule, Directory, Weather, Library)
             elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY"]:
+                # DIRECTORY 도구: 사용자 질의에 연락처/전화번호/사무실/과사 등의 명확한 의도가 없으면 오작동 방지를 위해 스킵
+                if tool.category == "DIRECTORY":
+                    query_intent_keywords = ["전화", "연락처", "번호", "과사", "사무실", "교수님", "교수", "위치", "호실", "문의", "연구실"]
+                    has_contact_intent = any(k in request.message.lower() for k in query_intent_keywords)
+                    if not has_contact_intent:
+                        logger.info(f"Skipping DIRECTORY tool: no contact/directory intent in query '{request.message}'")
+                        continue
+
                 tool_data = None
                 tool_args = await AgentRouter.extract_tool_arguments(
                     tool=tool,
                     query=request.message,
                     history=request.history,
                 )
+
+                if tool.category == "DIRECTORY":
+                    query_val = tool_args.get("query") if isinstance(tool_args, dict) else None
+                    if not query_val or not str(query_val).strip():
+                        logger.info(f"Skipping DIRECTORY tool: empty query parameter in '{request.message}'")
+                        continue
+
                 bus_meta = tool_args.pop("_meta", None) if tool.category == "BUS" else None
 
                 try:
