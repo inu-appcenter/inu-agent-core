@@ -40,7 +40,7 @@ class CardSynthesizer:
         elif domain == "TIMETABLE":
             return cls._build_timetable_card(data)
         elif domain == "NOTICE":
-            return cls._build_notice_card(data)
+            return cls._build_notice_card(data, query=query)
         elif domain == "SCHEDULE":
             return cls._build_schedule_card(data)
         elif domain == "LMS":
@@ -236,9 +236,29 @@ class CardSynthesizer:
         )
 
     @classmethod
-    def _build_notice_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+    def _build_notice_card(cls, data: Optional[Any] = None, query: Optional[str] = None) -> Optional[ListCard]:
         if not data:
             return None
+
+        # [관련성 가드레일]: 질문이 주어졌을 때, 공지 의도가 없고 학칙/규정 등 다른 도메인 질의인 경우 무관한 공지 카드 노출 억제
+        if query and query.strip():
+            q_lower = query.lower().strip()
+            explicit_notice_keywords = ["공지", "소식", "모집", "안내문", "선발", "대회", "신청", "새소식"]
+            has_notice_query = any(k in q_lower for k in explicit_notice_keywords)
+
+            # 만약 명시적 공지 질의가 아니라면, 반환된 공지 제목 중에 질문 핵심 단어가 포함되어 있는지 확인
+            if not has_notice_query:
+                q_words = [w for w in re.findall(r"[a-zA-Z0-9가-힣]+", q_lower) if len(w) >= 2 and w not in ["알려줘", "알려", "있어", "어때", "어디", "요건", "자세히", "부탁"]]
+                notices_to_check = data if isinstance(data, list) else data.get("contents", data.get("notices", []))
+                has_relevant_title = False
+                for item in notices_to_check:
+                    t = str(item.get("title", "")).lower() if isinstance(item, dict) else ""
+                    if any(w in t for w in q_words):
+                        has_relevant_title = True
+                        break
+                if not has_relevant_title:
+                    return None
+
         items: List[ListItem] = []
         notices = data if isinstance(data, list) else data.get("contents", data.get("notices", []))
 
