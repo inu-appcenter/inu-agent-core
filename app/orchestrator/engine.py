@@ -53,10 +53,10 @@ class AgentOrchestrator:
 
         # 2. Execute tools if matched and synthesize SDUI cards
         for tool in pruned_tools:
-            # Case A: Client Action (LMS, Portal ERP, Library P2P) -> Check client_context or emit instruction
-            if tool.category in ["LMS", "PORTAL", "LIBRARY"]:
+            # Case A: Client Action (LMS, Portal ERP) -> Check client_context or emit instruction
+            if tool.category in ["LMS", "PORTAL"]:
                 client_ctx = request.client_context or {}
-                domain_key = tool.category.lower()  # "lms", "portal", "library"
+                domain_key = tool.category.lower()  # "lms", "portal"
                 domain_data = client_ctx.get(domain_key)
 
                 if domain_data and isinstance(domain_data, (dict, list)):
@@ -87,17 +87,18 @@ class AgentOrchestrator:
                             logger.warning(f"Failed to generate client action for tool {tool.name}: {ex}")
 
                     if f"[{tool.category}_STATUS]" not in tool_summary_text:
-                        domain_name_kr = "이러닝(LMS)" if tool.category == "LMS" else ("도서관" if tool.category == "LIBRARY" else "포털 종합정보")
+                        domain_name_kr = "이러닝(LMS)" if tool.category == "LMS" else "포털 종합정보"
+                        item_kr = "과제, 수강 강좌, 출석" if tool.category == "LMS" else "성적, 취득 학점, 학적"
                         tool_summary_text += (
                             f"\n[{tool.category}_STATUS] ({domain_name_kr} 데이터 연동 상태):\n"
-                            f"- 개인정보 보호 및 보안(Zero-Knowledge) 원칙에 따라, {domain_name_kr}의 개인 과제, 수강 강좌, 출석, 성적 등은 사용자 기기(INTIP 앱) 연동을 통해서만 안전하게 실시간 조회됩니다.\n"
+                            f"- 개인정보 보호 및 보안(Zero-Knowledge) 원칙에 따라, {domain_name_kr}의 개인 {item_kr} 등은 사용자 기기(INTIP 앱) 연동을 통해서만 안전하게 실시간 조회됩니다.\n"
                             f"- 현재 세션에는 연동된 실제 학생의 {domain_name_kr} 데이터가 없습니다.\n"
-                            f"- [절대 금지]: 가상의 과목명(경영학원론, 데이터구조 등), 가상의 과제명, 가상의 마감 일자를 절대로 지어내거나 임의의 표로 작성하지 마십시오.\n"
-                            f"- [응답 지침]: 현재 연동된 과제/강좌 정보가 없으므로, 실시간 과제 마감과 강의 진도를 확인하려면 이러닝(LMS) 계정 연동(INTIP 앱 지원)이 필요함을 친절히 안내하십시오.\n"
+                            f"- [절대 금지]: 가상의 과목명이나 가상의 {item_kr}를 절대로 지어내거나 임의의 표로 작성하지 마십시오.\n"
+                            f"- [응답 지침]: 현재 연동된 {domain_name_kr} 정보가 없으므로, 실시간 확인을 위해 {domain_name_kr} 계정 연동(INTIP 앱 지원)이 필요함을 친절히 안내하십시오.\n"
                         )
 
-            # Case B: Server OpenAPI Tool (Cafeteria, Bus, Timetable, Notices, Schedule, Directory, Weather)
-            elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER"]:
+            # Case B: Server OpenAPI / Direct Tools (Cafeteria, Bus, Timetable, Notices, Schedule, Directory, Weather, Library)
+            elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY"]:
                 tool_data = None
                 tool_args = await AgentRouter.extract_tool_arguments(
                     tool=tool,
@@ -139,9 +140,21 @@ class AgentOrchestrator:
                                     f"- 현재 해당 정류소에 운행 대기 중이거나 도착 예정인 인팁 서비스 대상 버스({', '.join(valid_routes)})가 없습니다.\n"
                                     f"- [엄격 지침]: 인팁 프론트엔드에서 공식 서비스하지 않는 일반 시내/광역 버스(예: M6464 등)는 절대로 답변에 언급하지 마십시오. 서비스 대상 노선({', '.join(valid_routes)}) 중 현재 도착 정보가 없음을 사실대로 친절히 안내하세요.\n"
                                 )
+                        elif tool.category == "LIBRARY" and isinstance(res, dict) and "rooms" in res:
+                            tool_data = res
+                            rooms_info = "\n".join([
+                                f"- {r['name']}: 잔여 {r['available_seats']}석 / 전체 {r['total_seats']}석 (사용 중: {r['occupied_seats']}석, 이용률 {r['utilization_rate']})"
+                                for r in res.get("rooms", [])
+                            ])
+                            tool_summary_text += (
+                                f"\n[인천대학교 학술정보관(도서관) 열람실 실시간 좌석 현황]:\n"
+                                f"{rooms_info}\n"
+                                f"- [응답 지침]: 위 실시간 잔여 좌석 데이터를 바탕으로 사용자에게 열람실별 현재 잔여 좌석 수와 여유/혼잡 상태를 친절하고 정확하게 안내하세요.\n"
+                                f"- [금지 사항]: INTIP 앱 내에 존재하지 않는 가상의 '도서관 메뉴'나 '예약 버튼'을 누르라고 거짓 안내하지 마십시오. 열람실 좌석 배정 및 스터디룸 예약은 학술정보관 공식 모바일 웹(https://lib.inu.ac.kr) 또는 학술정보관 현장 키오스크를 통해 진행할 수 있음을 안내하세요.\n"
+                            )
                         else:
                             tool_data = res
-                            logger.info(f"Successfully executed OpenApiTool: {tool.name} with dynamic args {tool_args}")
+                            logger.info(f"Successfully executed tool: {tool.name} with dynamic args {tool_args}")
                             tool_summary_text += f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
                     else:
                         logger.warning(f"OpenApiTool {tool.name} returned error or empty: {res}")

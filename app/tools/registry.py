@@ -12,9 +12,8 @@ from app.tools.openapi import OpenApiConnector, OpenApiTool
 from app.tools.action_tool import ClientActionTool
 from app.rules.registry import action_rule_registry
 
-
 from app.tools.inuchat import InuAiKnowledgeTool
-
+from app.tools.library import LibrarySeatTool
 
 class ToolRegistry:
     def __init__(self):
@@ -35,11 +34,17 @@ class ToolRegistry:
         Register external action rules (LMS, Library, Portal) as callable LLM tools.
         """
         rules = action_rule_registry.list_rules()
+        registered_count = 0
         for rule in rules:
+            # Library real-time seats are handled directly by server tool LibrarySeatTool.
+            # Only personal LMS and PORTAL ERP rules use on-device client actions.
+            if rule.domain == "LIBRARY":
+                continue
             action_tool = ClientActionTool(rule)
             self.register(action_tool)
-        logger.info(f"Registered {len(rules)} Client Action tools (LMS, Library, Portal).")
-        return len(rules)
+            registered_count += 1
+        logger.info(f"Registered {registered_count} Client Action tools (LMS, Portal).")
+        return registered_count
 
     async def sync_inu_portal_tools(self) -> int:
         """
@@ -68,12 +73,14 @@ class ToolRegistry:
         return len(parsed_tools)
 
     async def initialize_all_tools(self) -> None:
-        """Initialize internal OpenAPI tools, INUChat RAG knowledge tool, and external Client Action tools."""
+        """Initialize internal OpenAPI tools, INUChat RAG knowledge tool, Library real-time tool, and external Client Action tools."""
         # 1. Register InuChat Knowledge Tool
         self.register(InuAiKnowledgeTool())
-        # 2. Register Client Action Tools
+        # 2. Register Library Real-time Public Seat Tool
+        self.register(LibrarySeatTool())
+        # 3. Register Client Action Tools
         self.register_client_action_rules()
-        # 3. Register OpenAPI Tools
+        # 4. Register OpenAPI Tools
         await self.sync_inu_portal_tools()
 
 

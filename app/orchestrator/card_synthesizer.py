@@ -46,6 +46,8 @@ class CardSynthesizer:
             return cls._build_directory_card(data)
         elif domain == "WEATHER":
             return cls._build_weather_card(data)
+        elif domain == "LIBRARY":
+            return cls._build_library_card(data)
         elif domain in ["INU_AI_KNOWLEDGE", "INU_AI", "CITATION"]:
             return cls._build_inuchat_citation_card(data)
 
@@ -400,6 +402,60 @@ class CardSynthesizer:
                 MetricCardItem(label="강수량", value=str(rain)),
             ],
             footer_text="기상청 실시간 송도 캠퍼스 관측 데이터 기반",
+        )
+
+    @classmethod
+    def _build_library_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+        if not data:
+            return None
+        items: List[ListItem] = []
+        raw_rooms = []
+        if isinstance(data, dict):
+            raw_rooms = data.get("rooms") or data.get("list") or []
+        elif isinstance(data, list):
+            raw_rooms = data
+
+        for room in raw_rooms[:6]:
+            if not isinstance(room, dict):
+                continue
+            name = room.get("name") or "열람실"
+            available = room.get("available_seats")
+            total = room.get("total_seats")
+            if available is None and "seats" in room and isinstance(room["seats"], dict):
+                available = room["seats"].get("available", 0)
+                total = room["seats"].get("total", 0)
+
+            total = total or 0
+            available = available or 0
+            occupied = total - available
+
+            rate = round((occupied / total * 100), 1) if total > 0 else 0.0
+
+            if available == 0 and total > 0:
+                tag = "만석"
+            elif rate >= 80:
+                tag = "혼잡"
+            elif rate >= 50:
+                tag = "보통"
+            else:
+                tag = "여유"
+
+            items.append(
+                ListItem(
+                    title=str(name),
+                    subtitle=f"잔여 {available}석 / 전체 {total}석 (이용률 {rate}%)",
+                    tag=tag,
+                    link="https://lib.inu.ac.kr",
+                )
+            )
+
+        if not items:
+            return None
+
+        return ListCard(
+            title="📚 학술정보관 열람실 좌석 현황",
+            items=items,
+            footer_text="인천대학교 학술정보관 실시간 좌석 배정 시스템 기준",
         )
 
 
