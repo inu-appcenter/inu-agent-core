@@ -3,6 +3,7 @@ Core Agent Orchestration Engine
 Integrates Tool Registry, Tool Pruner (Gemma 27B optimization), and ReAct execution with SSE streaming.
 """
 from typing import AsyncGenerator, List, Dict, Any, Optional
+from datetime import datetime, timezone, timedelta
 import json
 
 from app.core.logging import logger
@@ -85,6 +86,49 @@ class AgentOrchestrator:
                             f"- 입학 정보: {entry}학번\n"
                             f"- [응답 지침]: 위 연동된 실제 학적 및 학점 데이터를 바탕으로 학생의 질문에 정확하고 친절하게 답변하세요.\n"
                         )
+                    elif tool.category == "LMS" and isinstance(domain_data, (dict, list)):
+                        events = []
+                        courses = []
+                        if isinstance(domain_data, dict):
+                            events = domain_data.get("events") or domain_data.get("assignments") or []
+                            courses = domain_data.get("courses") or []
+                        elif isinstance(domain_data, list):
+                            events = domain_data
+
+                        lms_lines = ["\n[이러닝(LMS) 실제 학생 연동 데이터]:"]
+                        if events:
+                            lms_lines.append(f"- 다가오는 과제/시험/일정 (총 {len(events)}건):")
+                            for ev in events[:8]:
+                                if isinstance(ev, dict):
+                                    ev_name = ev.get("name") or ev.get("title") or "과제"
+                                    c_info = ev.get("course")
+                                    c_name = c_info.get("fullname") if isinstance(c_info, dict) else str(c_info or "")
+
+                                    due_str = ev.get("formattedtime")
+                                    if not due_str:
+                                        ts = ev.get("timesort") or ev.get("timestart")
+                                        if isinstance(ts, (int, float)) and ts > 0:
+                                            try:
+                                                kst = timezone(timedelta(hours=9))
+                                                due_str = datetime.fromtimestamp(ts, tz=kst).strftime("%m월 %d일(%a) %H:%M")
+                                            except Exception:
+                                                due_str = str(ts)
+                                    due_str = due_str or "마감일시 미정"
+                                    c_prefix = f"[{c_name}] " if c_name else ""
+                                    lms_lines.append(f"  • {c_prefix}{ev_name} (마감: {due_str})")
+                        else:
+                            lms_lines.append("- 다가오는 마감 예정 과제 및 일정: 없음 (모두 완료 또는 등록된 과제 없음)")
+
+                        if courses:
+                            lms_lines.append(f"- 현재 수강 중인 강좌 (총 {len(courses)}과목):")
+                            for c in courses[:10]:
+                                if isinstance(c, dict):
+                                    c_name = c.get("fullname") or c.get("name") or ""
+                                    if c_name:
+                                        lms_lines.append(f"  • {c_name}")
+
+                        lms_lines.append("- [응답 지침]: 위 연동된 실제 LMS 과제 및 수강 강좌 데이터를 바탕으로 학생에게 친절하고 명확하게 답변하세요.")
+                        tool_summary_text += "\n".join(lms_lines) + "\n"
                     else:
                         tool_summary_text += f"\n[{tool.category} 실제 학생 연동 데이터]:\n{json.dumps(domain_data, ensure_ascii=False)[:1000]}\n"
 
@@ -136,10 +180,11 @@ class AgentOrchestrator:
                             domain_name_kr = "이러닝(LMS)"
                             tool_summary_text += (
                                 f"\n[LMS_STATUS] (이러닝 데이터 연동 상태):\n"
-                                f"- 개인정보 보호 및 보안(Zero-Knowledge) 원칙에 따라, 이러닝의 개인 과제, 수강 강좌, 출석 등은 사용자 기기(INTIP 앱) 연동을 통해서만 안전하게 실시간 조회됩니다.\n"
+                                f"- 개인정보 보호 및 보안(Zero-Knowledge) 원칙에 따라, 학생의 이러닝(LMS) 과제 및 수강 강좌는 사용자 기기(INTIP 앱) 연동을 통해서만 안전하게 실시간 조회됩니다.\n"
                                 f"- 현재 세션에는 연동된 실제 학생의 이러닝 데이터가 없습니다.\n"
+                                f"- [연동 방법 안내]: INTIP 앱의 [설정] > [이러닝(LMS) 계정 연동] 또는 [포털 계정 연동]을 통해 계정을 등록하시면 실시간 과제와 강의 일정을 즉시 조회할 수 있습니다.\n"
                                 f"- [절대 금지]: 가상의 과목명이나 가상의 과제를 절대로 지어내지 마십시오.\n"
-                                f"- [응답 지침]: 현재 연동된 이러닝 정보가 없으므로, 실시간 확인을 위해 이러닝 계정 연동(INTIP 앱 지원)이 필요함을 친절히 안내하십시오.\n"
+                                f"- [응답 지침]: 현재 연동된 이러닝 정보가 없으므로, 위 연동 경로를 안내하며 앱 내 연동이 필요함을 친절히 안내하십시오.\n"
                             )
 
             # Case B: Server OpenAPI / Direct Tools (Cafeteria, Bus, Timetable, Notices, Schedule, Directory, Weather, Library)

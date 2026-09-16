@@ -4,6 +4,7 @@ Synthesizes rich Universal SDUI Cards (ListCard, MetricCard, StatusCard, ActionC
 based on executed tool data or domain intents.
 """
 from typing import Optional, Dict, Any, List
+from datetime import datetime, timezone, timedelta
 from app.llm.schemas import (
     GenerativeCard,
     ListCard,
@@ -298,14 +299,29 @@ class CardSynthesizer:
                 ev_name = ev.get("name") or ev.get("title") or "과제"
                 course_info = ev.get("course")
                 c_name = course_info.get("fullname") if isinstance(course_info, dict) else str(course_info or "")
-                due = ev.get("timedue") or ev.get("dueDate") or ev.get("date") or "마감 예정"
+
+                # 마감 일시 정밀 파싱 (formattedtime 우선, 그 다음 Unix timestamp)
+                due = ev.get("formattedtime")
+                if not due:
+                    ts = ev.get("timesort") or ev.get("timestart")
+                    if isinstance(ts, (int, float)) and ts > 0:
+                        try:
+                            kst = timezone(timedelta(hours=9))
+                            due = datetime.fromtimestamp(ts, tz=kst).strftime("%m월 %d일 %H:%M")
+                        except Exception:
+                            due = str(ts)
+                if not due:
+                    due = ev.get("timedue") or ev.get("dueDate") or ev.get("date") or "마감 예정"
+
                 sub = f"{c_name} · {due}" if c_name else str(due)
+                direct_url = ev.get("url") or (ev.get("action") or {}).get("url") or "https://lms.inu.ac.kr"
+
                 items.append(
                     ListItem(
                         title=str(ev_name),
                         subtitle=sub,
                         tag="과제",
-                        link="https://lms.inu.ac.kr",
+                        link=str(direct_url),
                     )
                 )
 
@@ -313,12 +329,14 @@ class CardSynthesizer:
             for c in courses[:5]:
                 if isinstance(c, dict):
                     c_name = c.get("fullname") or c.get("name") or "수강 강좌"
+                    c_id = c.get("id")
+                    c_url = f"https://lms.inu.ac.kr/course/view.php?id={c_id}" if c_id else "https://lms.inu.ac.kr"
                     items.append(
                         ListItem(
                             title=str(c_name),
                             subtitle="현재 수강 중인 강좌",
                             tag="강좌",
-                            link="https://lms.inu.ac.kr",
+                            link=c_url,
                         )
                     )
 
