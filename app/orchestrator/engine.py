@@ -458,6 +458,11 @@ class AgentOrchestrator:
                 has_contact_intent = any(k in request.message.lower() for k in query_intent_keywords)
                 if not has_contact_intent:
                     return
+            elif tool.category == "NOTICE":
+                notice_intent_keywords = ["공지", "소식", "모집", "안내문", "선발", "대회", "신청"]
+                has_notice_intent = any(k in request.message.lower() for k in notice_intent_keywords)
+                if not has_notice_intent:
+                    return
 
             yield (
                 AgentStreamEvent(

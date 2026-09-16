@@ -56,33 +56,9 @@ class DynamicBusMatcher:
         matched_tab_name = "인입런"
         valid_routes: List[str] = []
 
-        # 1. Match from live server stop aliases
+        # 1. Match from live server route sections first (actual boarding/origin stops like 공대/자연대, 인입런, 지정단런)
         best_score = 0.0
-        for a in aliases:
-            if not isinstance(a, dict):
-                continue
-            bstop_id = a.get("bstopId")
-            bstop_name = a.get("bstopName") or ""
-            stop_alias = a.get("stopAlias") or ""
-            memo = a.get("memo") or ""
-
-            candidates = [bstop_name, stop_alias, memo]
-            for cand in candidates:
-                if not cand:
-                    continue
-                if cand.lower() in target_text.lower() or target_text.lower() in cand.lower():
-                    matched_bstop_id = bstop_id
-                    resolved_stop_name = stop_alias or bstop_name
-                    best_score = 1.0
-                    break
-                ratio = difflib.SequenceMatcher(None, target_text.lower(), cand.lower()).ratio()
-                if ratio > best_score and ratio > 0.4:
-                    best_score = ratio
-                    matched_bstop_id = bstop_id
-                    resolved_stop_name = stop_alias or bstop_name
-
-        # 2. Match from live server route sections if not matched from aliases
-        if not matched_bstop_id or best_score < 0.6:
+        if sections:
             for sec in sections:
                 if not isinstance(sec, dict):
                     continue
@@ -91,7 +67,7 @@ class DynamicBusMatcher:
                 s_id = sec.get("startBstopId")
                 tab_name = sec.get("tabName") or ""
 
-                for cand in [s_name, s_alias, tab_name]:
+                for cand in [s_alias, s_name, tab_name]:
                     if not cand:
                         continue
                     if cand.lower() in target_text.lower() or target_text.lower() in cand.lower():
@@ -106,6 +82,39 @@ class DynamicBusMatcher:
                         matched_bstop_id = s_id
                         resolved_stop_name = s_alias or s_name
                         matched_tab_name = tab_name
+                if best_score == 1.0:
+                    break
+
+        # 2. Match from live server stop aliases if not matched with high confidence from route sections
+        if not matched_bstop_id or best_score < 0.8:
+            for a in aliases:
+                if not isinstance(a, dict):
+                    continue
+                bstop_id = a.get("bstopId")
+                bstop_name = a.get("bstopName") or ""
+                stop_alias = a.get("stopAlias") or ""
+                memo = a.get("memo") or ""
+
+                # Skip destination-only drop-off stops if possible
+                if "도착" in memo and best_score >= 0.5:
+                    continue
+
+                candidates = [stop_alias, bstop_name, memo]
+                for cand in candidates:
+                    if not cand:
+                        continue
+                    if cand.lower() in target_text.lower() or target_text.lower() in cand.lower():
+                        matched_bstop_id = bstop_id
+                        resolved_stop_name = stop_alias or bstop_name
+                        best_score = 1.0
+                        break
+                    ratio = difflib.SequenceMatcher(None, target_text.lower(), cand.lower()).ratio()
+                    if ratio > best_score and ratio > 0.4:
+                        best_score = ratio
+                        matched_bstop_id = bstop_id
+                        resolved_stop_name = stop_alias or bstop_name
+                if best_score == 1.0:
+                    break
 
         # 3. Default to first route section if not found
         if not matched_bstop_id and sections:
@@ -184,7 +193,7 @@ class AgentRouter:
             "required": ["thought", "tools"],
         }
 
-        system_msg = f"""당신은 인천대학교 캠퍼스 AI 비서 '챗불이'의 자율 오케스트레이터입니다.
+        system_msg = f"""당신은 '인천대학교 AI 에이전트 챗불이'의 자율 오케스트레이터입니다.
 현재 시점: {now.year}년 {now.month}월 {now.day}일
 
 [핵심 지침]:
@@ -192,11 +201,15 @@ class AgentRouter:
 2. [1인칭 졸업/학사 판정 질의]:
    '나 졸업 가능해?', '나 졸업 요건 돼?', '내 취득학점'처럼 1인칭으로 본인의 졸업/학점을 묻는 질문은,
    학생 본인의 학적(소속 학과, 학번, 취득 학점) 확인이 필수적이므로 먼저 'PORTAL'을 반드시 포함하세요.
-3. [판단 이유 (thought) 작성 규칙]:
-   기계적인 템플릿 문구가 아니라, 질문에 등장한 대상(예: 정문 버스, 공학관 학식, 컴퓨터공학부 졸업 요건 등)을 직접 언급하며 실제 AI가 추론하는 자연스러운 문장으로 작성하세요.
-   - 예: '학우님의 졸업 가능 여부를 확인하기 위해 먼저 소속 학과와 취득 학점 등 학적 정보를 포털 시스템에서 조회합니다.'
-   - 예: '인천대 정문 정류소의 실시간 시내버스 도착 정보를 확인하고 있습니다.'
-   - 예: '오늘의 교내 학생식당 메뉴와 운영 현황을 조회하고 있습니다.'
+3. [일반 학과 규정/학칙 질의]:
+   '컴퓨터공학과 졸업 요건 알려줘'처럼 3인칭 또는 일반 학과 규정을 묻는 질문은 개인 학적 조회가 불필요하므로 'INU_AI_KNOWLEDGE'만 선택하세요.
+4. [판단 이유 (thought) 작성 및 정직성 규칙]:
+   - 반드시 실제 선택한 'tools' 목록에 부합하는 판단 이유만 작성해야 합니다.
+   - 예: 'PORTAL' 도구를 선택하지 않았으면서 "학우님의 학적/학점 정보와 대조하고 있습니다" 같은 가짜 행동(Hallucination)을 작성하는 것은 절대 금지됩니다!
+   - 질문에 등장한 대상(예: 정문 버스, 공학관 학식, 컴퓨터공학부 졸업 요건 등)을 직접 언급하며 실제 실행할 도구의 목적을 솔직하게 작성하세요.
+   - 예 (학칙 질의): '컴퓨터공학부의 공식 학칙 및 졸업 요건 규정을 지식베이스에서 확인하고 있습니다.'
+   - 예 (버스 질의): '인천대 정문 정류소의 실시간 시내버스 도착 정보를 확인하고 있습니다.'
+   - 예 (학식 질의): '오늘의 교내 학생식당 메뉴와 운영 현황을 조회하고 있습니다.'
 
 {history_str}
 [사용 가능한 도구 목록]:

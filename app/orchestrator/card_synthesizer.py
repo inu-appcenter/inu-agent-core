@@ -176,6 +176,7 @@ class CardSynthesizer:
                                 title=str(corner),
                                 subtitle=str(menu_text).replace("\n", " | "),
                                 tag=m.get("mealLabel", "식단"),
+                                link="/home/menu",
                             )
                         )
         elif isinstance(data, dict):
@@ -191,6 +192,7 @@ class CardSynthesizer:
                                 title=str(name),
                                 subtitle=str(menu).replace("\n", " | "),
                                 tag=target_meal,
+                                link="/home/menu",
                             )
                         )
 
@@ -220,6 +222,7 @@ class CardSynthesizer:
                         title=str(name),
                         subtitle=f"{time_str} ({room})".strip(),
                         tag="강의",
+                        link="/timetable",
                     )
                 )
 
@@ -284,6 +287,7 @@ class CardSynthesizer:
                         title=str(title),
                         subtitle=date_str,
                         tag="일정",
+                        link="/home/calendar",
                     )
                 )
 
