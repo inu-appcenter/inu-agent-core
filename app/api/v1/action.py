@@ -50,7 +50,7 @@ async def report_action_result(report: ClientActionResult) -> Dict[str, Any]:
             ))
 
         card = ListCard(
-            title="사이버캠퍼스(LMS) 과제 및 일정",
+            title="이러닝(LMS) 과제 및 일정",
             items=items if items else [ListItem(title="예정된 과제가 없습니다.", subtitle="모든 과제를 완료했습니다.")],
             footer_text=f"총 {len(raw_items)}건 확인됨",
         )

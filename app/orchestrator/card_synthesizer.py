@@ -293,7 +293,7 @@ class CardSynthesizer:
             return ComponentCard(
                 type="LMS_ASSIGNMENTS",
                 data=data,
-                link=CardLink(label="사이버캠퍼스 바로가기", route="https://lms.inu.ac.kr"),
+                link=CardLink(label="이러닝(LMS) 바로가기", route="https://lms.inu.ac.kr"),
             )
 
         items: List[ListItem] = []

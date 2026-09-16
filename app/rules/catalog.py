@@ -6,14 +6,14 @@ from app.rules.models import ActionRule, RuleTarget, RuleExtraction, FieldExtrac
 
 DEFAULT_ACTION_RULES: Dict[str, ActionRule] = {
     # -------------------------------------------------------------------------
-    # LMS (사이버캠퍼스 Moodle)
+    # LMS (이러닝 Moodle)
     # -------------------------------------------------------------------------
     "LMS_GET_COURSES": ActionRule(
         action_id="LMS_GET_COURSES",
         domain="LMS",
         protocol="HTTP_REST",
         title="수강 강좌 목록 조회",
-        description="사이버캠퍼스(LMS)에서 학생이 현재 수강 중인 강좌 목록을 조회합니다.",
+        description="이러닝(LMS)에서 학생이 현재 수강 중인 강좌 목록을 조회합니다.",
         version="1.0.0",
         target=RuleTarget(
             url="https://lms.inu.ac.kr/webservice/rest/server.php",
@@ -30,7 +30,7 @@ DEFAULT_ACTION_RULES: Dict[str, ActionRule] = {
         domain="LMS",
         protocol="HTTP_REST",
         title="다가오는 과제 및 일정 조회",
-        description="사이버캠퍼스(LMS)에서 마감 예정인 과제, 퀴즈, 시험 일정을 조회합니다.",
+        description="이러닝(LMS)에서 마감 예정인 과제, 퀴즈, 시험 일정을 조회합니다.",
         version="1.0.0",
         target=RuleTarget(
             url="https://lms.inu.ac.kr/webservice/rest/server.php",
@@ -45,14 +45,14 @@ DEFAULT_ACTION_RULES: Dict[str, ActionRule] = {
     ),
 
     # -------------------------------------------------------------------------
-    # 도서관 (학술정보관 Pyxis)
+    # 도서관 (학산도서관 Pyxis)
     # -------------------------------------------------------------------------
     "LIB_GET_READING_ROOMS": ActionRule(
         action_id="LIB_GET_READING_ROOMS",
         domain="LIBRARY",
         protocol="HTTP_REST",
         title="열람실 전체 좌석 현황",
-        description="학술정보관 열람실별 잔여 좌석 수 및 운영 상태를 조회합니다.",
+        description="학산도서관 열람실별 잔여 좌석 수 및 운영 상태를 조회합니다.",
         version="1.0.0",
         target=RuleTarget(
             url="https://lib.inu.ac.kr/pyxis-api/1/seat-rooms",

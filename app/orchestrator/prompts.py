@@ -35,7 +35,10 @@ def is_out_of_scope_question(msg: str) -> bool:
     math_keywords = ["풀어줘", "계산해줘", "방정식", "미분", "적분"]
     if any(k in lower for k in math_keywords):
         is_academic_context = any(
-            k in lower for k in ["학점", "gpa", "평점", "등록금", "장학금"]
+            k in lower for k in [
+                "학점", "gpa", "평점", "등록금", "장학금",
+                "공강", "시간", "시간표", "수업", "강의", "통학", "배차"
+            ]
         )
         if not is_academic_context:
             return True
@@ -53,7 +56,7 @@ def is_out_of_scope_question(msg: str) -> bool:
 OUT_OF_SCOPE_REFUSAL_MESSAGE = (
     "죄송합니다. 저는 인천대학교 학사 행정 및 대학 생활 안내를 돕는 전문 어시스턴트 '챗불이'로서 "
     "코딩, 수학 문제 풀이 등 학사/캠퍼스 생활과 무관한 질문에는 답변을 드릴 수 없습니다. 😊\n\n"
-    "학식, 셔틀버스, 도서관 열람실, 학사 규정, 졸업 요건 등 대학 생활에 대해 궁금한 점이 있으시면 언제든 편하게 물어봐 주세요!"
+    "학식, 등하교 버스, 도서관 열람실, 학사 규정, 졸업 요건 등 대학 생활에 대해 궁금한 점이 있으시면 언제든 편하게 물어봐 주세요!"
 )
 
 

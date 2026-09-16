@@ -86,6 +86,8 @@ class ToolPruner:
             score = 0
             if tool.category in matched_categories:
                 score += 10
+            elif tool.category != "GENERAL":
+                continue
 
             # Match directly on tool name or description
             desc = tool.description.lower()
@@ -94,6 +96,19 @@ class ToolPruner:
                 for kw in cls.CATEGORY_KEYWORDS.get(cat, []):
                     if kw in desc or kw in name:
                         score += 5
+
+            # Bonus for search and general list endpoints
+            if "search" in name or (hasattr(tool, "path") and "search" in tool.path):
+                score += 3
+            if "bymonth" in name or "all" in name or "top" in name:
+                score += 4
+
+            # Penalize single-item detail endpoints with path variables (e.g. {id}, {scheduleId})
+            # if user query does not contain specific IDs or digits
+            if hasattr(tool, "path") and "{" in tool.path and "}" in tool.path:
+                has_digit = any(char.isdigit() for char in query)
+                if not has_digit:
+                    score -= 15
 
             if score > 0:
                 scored_tools.append((score, tool))

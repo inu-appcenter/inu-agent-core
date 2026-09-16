@@ -43,7 +43,7 @@ class LibrarySeatTool(BaseTool):
     def __init__(self):
         self.name = "library_reading_rooms_status"
         self.description = (
-            "인천대학교 학술정보관(도서관) 열람실 실시간 잔여 좌석 조회 및 "
+            "인천대학교 학산도서관 열람실 실시간 잔여 좌석 조회 및 "
             "열람실 특정 좌석 배정 신청(대화형 카드), 스터디룸 예약 신청을 처리합니다."
         )
         self.category = "LIBRARY"
@@ -195,7 +195,7 @@ class LibrarySeatTool(BaseTool):
                     rooms.append({
                         "id": item.get("id"),
                         "name": r_name,
-                        "branch": (item.get("branch") or {}).get("name", "학술정보관"),
+                        "branch": (item.get("branch") or {}).get("name", "학산도서관"),
                         "isChargeable": item.get("isChargeable", True),
                         "total_seats": total,
                         "occupied_seats": occupied,

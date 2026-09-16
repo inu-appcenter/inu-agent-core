@@ -173,12 +173,17 @@ class AgentRouter:
                 }
 
         # For other schema-driven tools, ask LLM to extract arguments conforming to the OpenAPI parameters schema
+        from datetime import datetime
+        now = datetime.now()
+
         system_msg = f"""당신은 사용자의 질의로부터 OpenAPI REST API 호출에 필요한 JSON 인자(Arguments)를 정확히 추출하는 AI 파라미터 리졸버입니다.
 
 [도구 이름]: {fn.get('name')}
 [도구 설명]: {fn.get('description')}
 [도구 파라미터 JSON Schema]:
 {json.dumps(params_schema, ensure_ascii=False, indent=2)}
+
+[현재 기준 일시]: {now.year}년 {now.month}월 {now.day}일
 
 규칙:
 1. 사용자 질의에서 언급된 핵심 엔티티와 조건을 파악하여 파라미터 값을 추출하세요.
@@ -191,8 +196,12 @@ class AgentRouter:
    - 스터디룸 예약 요청(예: '205호 스터디룸 예약'): target="RESERVE_STUDY_ROOM", room_name, date, begin_time, end_time 추출.
    - 스터디룸 목록 질의(예: '스터디룸 목록 보여줘', '스터디룸 뭐 있어?'): target="STUDY_ROOMS".
    - 열람실 잔여 좌석/현황 질의(예: '도서관 자리 있어?', '열람실 좌석 남아있어?'): target="SEATS", room_name(특정 열람실 언급 시).
-5. 질의에 명시되지 않은 선택적 파라미터는 기본값(default)을 사용하거나 생략하세요.
-6. 반드시 오직 유효한 JSON 객체({{ ... }})만 반환하세요.
+5. 학사일정(schedule) 파라미터(year, month) 추출 시:
+   - 사용자가 '이번 달', '오늘', '학사일정' 등을 언급하거나 연도/월을 생략한 경우 현재 연도({now.year})와 현재 월({now.month})을 정수(integer)로 추출하세요.
+6. 공지사항(notice) 검색어(query) 추출 시:
+   - 사용자가 '장학 공지', '학사 공지' 등을 물은 경우 검색어(query)에 '장학', '학사' 등 핵심 키워드를 추출하세요.
+7. 질의에 명시되지 않은 선택적 파라미터는 기본값(default)을 사용하거나 생략하세요.
+8. 반드시 오직 유효한 JSON 객체({{ ... }})만 반환하세요.
 """
         messages = [
             {"role": "system", "content": system_msg},
