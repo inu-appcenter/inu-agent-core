@@ -44,6 +44,8 @@ class CardSynthesizer:
         elif domain == "SCHEDULE":
             return cls._build_schedule_card(data)
         elif domain == "LMS":
+            if data == "AUTH_REQUIRED" or (isinstance(data, dict) and data.get("auth_required")):
+                return cls._build_lms_auth_card()
             return cls._build_lms_card(data)
         elif domain == "DIRECTORY":
             return cls._build_directory_card(data)
@@ -52,7 +54,11 @@ class CardSynthesizer:
         elif domain == "LIBRARY":
             return cls._build_library_card(data)
         elif domain in ["PORTAL", "ACADEMIC"]:
+            if data == "AUTH_REQUIRED" or (isinstance(data, dict) and data.get("auth_required")) or not data:
+                return cls._build_portal_auth_card()
             return cls._build_academic_card(data)
+        elif domain in ["CAMPUS_WATCH", "WATCH", "LOCAL_WATCH"]:
+            return cls._build_campus_watch_card(data)
         elif domain in ["INU_AI_KNOWLEDGE", "INU_AI", "CITATION"]:
             return cls._build_inuchat_citation_card(data)
 
@@ -548,4 +554,59 @@ class CardSynthesizer:
             title="학적 기본 정보",
             data=normalized_data,
             link=CardLink(label="학적 정보 상세보기", route="/mypage"),
+        )
+
+    @classmethod
+    def _build_portal_auth_card(cls) -> ComponentCard:
+        """포털 계정 1회 연동 안내 카드 (PortalAuthRequiredCard)"""
+        return ComponentCard(
+            type="PORTAL_AUTH_REQUIRED",
+            title="포털 계정 1회 연동이 필요해요",
+            data={},
+            link=CardLink(label="포털 계정 연동하기", route="/mypage"),
+        )
+
+    @classmethod
+    def _build_lms_auth_card(cls) -> ComponentCard:
+        """사이버캠퍼스(LMS) 계정 1회 연동 안내 카드 (LmsAuthRequiredCard)"""
+        return ComponentCard(
+            type="LMS_AUTH_REQUIRED",
+            title="사이버캠퍼스(LMS) 연동이 필요해요",
+            data={},
+            link=CardLink(label="LMS 계정 연동하기", route="/mypage"),
+        )
+
+    @classmethod
+    def _build_campus_watch_card(cls, data: Optional[Any] = None) -> Optional[ComponentCard]:
+        """도서관 빈자리 감시/스나이퍼/목록 카드 합성"""
+        if not data:
+            return None
+
+        comp_type = data.get("component_type") if isinstance(data, dict) else None
+        inner_data = data.get("data") if (isinstance(data, dict) and "data" in data) else data
+
+        if comp_type == "LOCAL_WATCH_ACTION":
+            target_name = (inner_data or {}).get("targetName", "좌석")
+            return ComponentCard(
+                type="LOCAL_WATCH_ACTION",
+                title=f"기기 내 빈자리 감시 ({target_name})",
+                data=inner_data or {},
+                link=CardLink(label="학산도서관 좌석", route="/services/library"),
+            )
+        elif comp_type == "CAMPUS_WATCH_LIST":
+            return ComponentCard(
+                type="CAMPUS_WATCH_LIST",
+                title="실시간 빈자리 감시 목록",
+                data=inner_data or {},
+                link=CardLink(label="감시 목록 관리", route="/mypage/notification/smart-watch"),
+            )
+
+        # 기본 CAMPUS_WATCH_RESULT 카드
+        target_name = (inner_data or {}).get("targetName", "힐링존")
+        remaining = (inner_data or {}).get("remainingMinutes", 90)
+        return ComponentCard(
+            type="CAMPUS_WATCH_RESULT",
+            title=f"실시간 빈자리 감시 시작 ({target_name})",
+            data=inner_data or {"targetName": target_name, "remainingMinutes": remaining},
+            link=CardLink(label="감시 현황 확인하기", route="/mypage/notification/smart-watch"),
         )

@@ -26,6 +26,7 @@ def resolve_tool_display_name(category: str, name: str) -> str:
         "PORTAL": "포털 종합정보(ERP) 학적 데이터",
         "LMS": "이러닝(LMS) 강의 및 과제",
         "LIBRARY": "학산도서관 좌석/열람실 시스템",
+        "CAMPUS_WATCH": "학산도서관 실시간 빈자리 알림 예약",
         "CAFETERIA": "학생식당 메뉴 정보",
         "BUS": "인천시 실시간 시내버스 도착 정보",
         "NOTICE": "학교 공식 공지사항",
@@ -39,7 +40,9 @@ def resolve_tool_display_name(category: str, name: str) -> str:
         return category_map[category]
 
     name_lower = name.lower()
-    if "timetable" in name_lower:
+    if "watch" in name_lower or "sniper" in name_lower:
+        return "학산도서관 실시간 빈자리 알림 예약"
+    elif "timetable" in name_lower:
         return "학사 강의 시간표 정보"
     elif "cafeteria" in name_lower or "menu" in name_lower:
         return "학생식당 메뉴 정보"
@@ -203,7 +206,7 @@ class AgentOrchestrator:
 
         # 4. Step 3: Response Streaming Strategy
         # Case 1: Pure Academic Regulation / Graduation query -> INUChat Direct Pass-through
-        other_campus_domains = {"BUS", "CAFETERIA", "TIMETABLE", "WEATHER", "LIBRARY", "DIRECTORY"}
+        other_campus_domains = {"BUS", "CAFETERIA", "TIMETABLE", "WEATHER", "LIBRARY", "DIRECTORY", "CAMPUS_WATCH"}
         has_other_campus_tools = bool(executed_categories.intersection(other_campus_domains))
         has_inuchat = "INU_AI_KNOWLEDGE" in executed_categories or inuchat_rag_data is not None
 
@@ -428,15 +431,30 @@ class AgentOrchestrator:
                     except Exception as ex:
                         logger.warning(f"Failed to generate client action for {tool.name}: {ex}")
 
+                # 연동 데이터가 없을 때 미연동 안내 카드(PORTAL_AUTH_REQUIRED / LMS_AUTH_REQUIRED)를 즉시 합성하여 전달
+                if tool.category not in emitted_cards:
+                    auth_card = CardSynthesizer.synthesize_for_domain(
+                        domain=tool.category,
+                        tool_name=tool.name,
+                        data="AUTH_REQUIRED",
+                        query=request.message,
+                    )
+                    if auth_card:
+                        yield (AgentStreamEvent(event_type="CARD", card=auth_card), "", None, None)
+                        emitted_cards.add(tool.category)
+
                 if tool.category == "PORTAL":
                     summary_out = (
-                        "\n[PORTAL_STATUS]: 현재 세션에는 연동된 실제 학생의 학적 데이터가 없습니다. "
-                        "INTIP 앱의 포털 계정 연동을 통해 실시간 학적 조회가 가능함을 안내하세요.\n"
+                        "\n[PORTAL_STATUS]: 현재 세션에는 연동된 학생의 실제 학적 데이터가 없습니다. "
+                        "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 즉시 조회가 가능함을 학생에게 친절히 안내하세요. "
+                        "(⚠️ 중요 지침: 앱의 '설정'이나 '마이페이지' 등 다른 메뉴로 이동하라고 안내하지 마세요! "
+                        "오직 '화면에 표시된 [포털 계정 연동하기] 버튼을 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
                     )
                 else:
                     summary_out = (
-                        "\n[LMS_STATUS]: 현재 세션에는 연동된 실제 학생의 이러닝 데이터가 없습니다. "
-                        "INTIP 앱의 이러닝 계정 연동을 통해 실시간 과제 조회가 가능함을 안내하세요.\n"
+                        "\n[LMS_STATUS]: 현재 세션에는 연동된 학생의 실제 이러닝 데이터가 없습니다. "
+                        "대화창에 표시된 [LMS 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 즉시 조회가 가능함을 학생에게 친절히 안내하세요. "
+                        "(⚠️ 중요 지침: 앱의 다른 메뉴를 안내하지 말고, 오직 '화면에 표시된 [LMS 계정 연동하기] 버튼을 눌러 연동을 진행해 주세요'라고만 안내해야 합니다.)\n"
                     )
 
             yield (
@@ -453,7 +471,7 @@ class AgentOrchestrator:
             )
 
         # Case B: Server OpenAPI / Direct Tools
-        elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY"]:
+        elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY", "CAMPUS_WATCH"]:
             if tool.category == "DIRECTORY":
                 query_intent_keywords = ["전화", "연락처", "번호", "과사", "사무실", "교수님", "교수", "위치", "호실", "문의", "연구실"]
                 has_contact_intent = any(k in request.message.lower() for k in query_intent_keywords)
@@ -518,6 +536,9 @@ class AgentOrchestrator:
                             for r in res.get("rooms", [])
                         ])
                         summary_out = f"\n[학산도서관 열람실 실시간 잔여 좌석 현황]:\n{rooms_info}\n"
+                    elif tool.category == "CAMPUS_WATCH" and isinstance(res, dict):
+                        tool_data = res
+                        summary_out = f"\n[학산도서관 실시간 빈자리 알림/스나이퍼 감시 결과]:\n{res.get('summary', '')}\n"
                     else:
                         tool_data = res
                         summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
