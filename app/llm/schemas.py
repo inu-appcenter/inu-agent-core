@@ -129,6 +129,7 @@ class ComponentCard(BaseModel):
     """
     card_type: Literal["COMPONENT_CARD"] = "COMPONENT_CARD"
     type: str
+    title: Optional[str] = None
     data: Dict[str, Any] = Field(default_factory=dict)
     link: Optional[CardLink] = None
 

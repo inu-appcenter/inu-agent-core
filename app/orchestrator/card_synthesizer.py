@@ -439,14 +439,16 @@ class CardSynthesizer:
         if not data:
             return None
 
-        # 1. INTIP 전용 대화형 컴포넌트 카드 우선 생성
+        # 1. INTIP 전용 대화형 컴포넌트 카드 (LIBRARY_SEAT_CONFIRM, LIBRARY_STUDY_ROOM_CONFIRM 등)
         if isinstance(data, dict):
             comp_type = data.get("component_type")
             if comp_type:
                 comp_data = data.get("data") or {}
                 link_info = data.get("link") or {"label": "학산도서관 좌석 배정", "route": "/services/library"}
+                card_title = "학산도서관 좌석 배정 신청 확인" if comp_type == "LIBRARY_SEAT_CONFIRM" else "학산도서관 스터디룸 예약 확인" if comp_type == "LIBRARY_STUDY_ROOM_CONFIRM" else "학산도서관"
                 return ComponentCard(
                     type=comp_type,
+                    title=card_title,
                     data=comp_data,
                     link=CardLink(label=link_info.get("label", "도서관"), route=link_info.get("route", "/services/library")),
                 )
@@ -462,6 +464,7 @@ class CardSynthesizer:
             # INTIP 고유 LibraryRoomsCard 규격 지원 (터치 시 좌석 선택 및 배정 연결)
             return ComponentCard(
                 type="LIBRARY_ROOMS",
+                title="학산도서관 실시간 열람실 좌석",
                 data={"rooms": raw_rooms},
                 link=CardLink(label="학산도서관 좌석 배정", route="/services/library"),
             )
@@ -473,10 +476,10 @@ class CardSynthesizer:
         if not data or not isinstance(data, dict):
             return None
 
-        # 1. INTIP 전용 학적 카드 컴포넌트 (AcademicInfoCard) 우선 생성
-        # 사용자 본인에게 표시할 전체 학적 데이터 규격을 그대로 전달하여 UI 렌더링
+        # INTIP 전용 학적 카드 컴포넌트 (AcademicInfoCard) 생성
         return ComponentCard(
             type="ACADEMIC_INFO",
+            title="학적 기본 정보",
             data=data,
             link=CardLink(label="학적 정보 상세보기", route="/mypage"),
         )
