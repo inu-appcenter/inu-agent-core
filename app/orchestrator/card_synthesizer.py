@@ -54,6 +54,8 @@ class CardSynthesizer:
         elif domain == "LIBRARY":
             return cls._build_library_card(data)
         elif domain in ["PORTAL", "ACADEMIC"]:
+            if data == "FETCH_FAILED" or (isinstance(data, dict) and data.get("status") == "FETCH_FAILED"):
+                return cls._build_academic_fetch_failed_card(data)
             if data == "AUTH_REQUIRED" or (isinstance(data, dict) and data.get("auth_required")) or not data:
                 return cls._build_portal_auth_card()
             return cls._build_academic_card(data)
@@ -564,6 +566,17 @@ class CardSynthesizer:
             title="포털 계정 연동이 필요해요",
             data={},
             link=CardLink(label="포털 계정 연동하기", route="/mypage"),
+        )
+
+    @classmethod
+    def _build_academic_fetch_failed_card(cls, data: Optional[Any] = None) -> ComponentCard:
+        """연동된 포털 계정의 일시적 학적 조회 실패 카드 (AcademicFetchFailedCard)"""
+        msg = (data.get("message") if isinstance(data, dict) else str(data or "")) or "포털 또는 ERP 응답을 확인하지 못했습니다."
+        return ComponentCard(
+            type="ACADEMIC_FETCH_FAILED",
+            title="연동된 포털에서 학적 정보를 가져오지 못했어요",
+            data={"message": msg},
+            link=CardLink(label="포털 상태 확인", route="/mypage"),
         )
 
     @classmethod

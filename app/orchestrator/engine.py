@@ -328,11 +328,12 @@ class AgentOrchestrator:
             )
 
             client_ctx = request.client_context or {}
+            portal_meta = client_ctx.get("portal") if isinstance(client_ctx.get("portal"), dict) else {}
+            is_portal_linked = portal_meta.get("linked") is True
+
             domain_data = None
             if tool.category == "PORTAL":
-                domain_data = client_ctx.get("academic") or client_ctx.get("academicDisplay") or client_ctx.get("portal")
-                if isinstance(domain_data, dict) and list(domain_data.keys()) == ["linked"]:
-                    domain_data = client_ctx.get("academic") or client_ctx.get("academicDisplay")
+                domain_data = client_ctx.get("academic") or client_ctx.get("academicDisplay")
             else:
                 domain_data = client_ctx.get("lms")
 
@@ -431,32 +432,51 @@ class AgentOrchestrator:
                     except Exception as ex:
                         logger.warning(f"Failed to generate client action for {tool.name}: {ex}")
 
-                # 연동 데이터가 없을 때 미연동 안내 카드(PORTAL_AUTH_REQUIRED / LMS_AUTH_REQUIRED)를 즉시 합성하여 전달
-                if tool.category not in emitted_cards:
-                    auth_card = CardSynthesizer.synthesize_for_domain(
-                        domain=tool.category,
-                        tool_name=tool.name,
-                        data="AUTH_REQUIRED",
-                        query=request.message,
-                    )
-                    if auth_card:
-                        yield (AgentStreamEvent(event_type="CARD", card=auth_card), "", None, None)
-                        emitted_cards.add(tool.category)
+                if tool.category == "PORTAL" and is_portal_linked:
+                    # 계정 연동은 되어 있으나 히든 웹뷰/ERP 응답 지연인 경우
+                    err_msg = portal_meta.get("academicErrorMessage") or "포털 또는 ERP 응답을 확인하지 못했습니다."
+                    if tool.category not in emitted_cards:
+                        fetch_fail_card = CardSynthesizer.synthesize_for_domain(
+                            domain="PORTAL",
+                            tool_name=tool.name,
+                            data={"status": "FETCH_FAILED", "message": err_msg},
+                            query=request.message,
+                        )
+                        if fetch_fail_card:
+                            yield (AgentStreamEvent(event_type="CARD", card=fetch_fail_card), "", None, None)
+                            emitted_cards.add(tool.category)
 
-                if tool.category == "PORTAL":
                     summary_out = (
-                        "\n[PORTAL_STATUS]: 현재 세션에는 연동된 학생의 실제 학적 데이터가 없습니다. "
-                        "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 즉시 조회가 가능함을 학생에게 친절히 안내하세요. "
-                        "(⚠️ 중요 지침: 앱의 '설정'이나 '마이페이지' 등 다른 메뉴로 이동하라고 안내하지 마세요! "
-                        "오직 '화면에 표시된 [포털 계정 연동하기] 버튼을 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
+                        f"\n[PORTAL_STATUS]: 학생의 포털 계정은 정상 연동되어 있으나, 학교 ERP(종합정보시스템) 응답 지연으로 학적 정보를 일시적으로 불러오지 못했습니다. ({err_msg}) "
+                        "학생에게 계정 연동은 잘 유지되어 있으니 잠시 후 같은 질문을 다시 보내달라고 친절하게 안내하세요. (⚠️ 중요 지침: 계정 연동 카드를 다시 누르라고 절대 안내하지 마세요!)\n"
                     )
                 else:
-                    summary_out = (
-                        "\n[LMS_STATUS]: 현재 세션에는 연동된 학생의 실제 이러닝(LMS) 데이터가 없습니다. "
-                        "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 이러닝 과제와 학적 조회가 즉시 가능함을 학생에게 친절히 안내하세요. "
-                        "(⚠️ 중요 지침: 인천대학교 포털, 이러닝(LMS), 도서관은 모두 동일한 포털 계정(학번/비밀번호)을 사용하므로 1회 등록 시 모두 함께 연동됩니다. "
-                        "앱의 '설정'이나 '마이페이지' 등 다른 메뉴를 안내하지 말고, 오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
-                    )
+                    # 연동 데이터가 없을 때 미연동 안내 카드(PORTAL_AUTH_REQUIRED / LMS_AUTH_REQUIRED)를 즉시 합성하여 전달
+                    if tool.category not in emitted_cards:
+                        auth_card = CardSynthesizer.synthesize_for_domain(
+                            domain=tool.category,
+                            tool_name=tool.name,
+                            data="AUTH_REQUIRED",
+                            query=request.message,
+                        )
+                        if auth_card:
+                            yield (AgentStreamEvent(event_type="CARD", card=auth_card), "", None, None)
+                            emitted_cards.add(tool.category)
+
+                    if tool.category == "PORTAL":
+                        summary_out = (
+                            "\n[PORTAL_STATUS]: 현재 세션에는 연동된 학생의 실제 학적 데이터가 없습니다. "
+                            "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 즉시 조회가 가능함을 학생에게 친절히 안내하세요. "
+                            "(⚠️ 중요 지침: 앱의 '설정'이나 '마이페이지' 등 다른 메뉴로 이동하라고 안내하지 마세요! "
+                            "오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
+                        )
+                    else:
+                        summary_out = (
+                            "\n[LMS_STATUS]: 현재 세션에는 연동된 학생의 실제 이러닝(LMS) 데이터가 없습니다. "
+                            "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 이러닝 과제와 학적 조회가 즉시 가능함을 학생에게 친절히 안내하세요. "
+                            "(⚠️ 중요 지침: 인천대학교 포털, 이러닝(LMS), 도서관은 모두 동일한 포털 계정(학번/비밀번호)을 사용하므로 1회 등록 시 모두 함께 연동됩니다. "
+                            "앱의 '설정'이나 '마이페이지' 등 다른 메뉴를 안내하지 말고, 오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
+                        )
 
             yield (
                 AgentStreamEvent(
