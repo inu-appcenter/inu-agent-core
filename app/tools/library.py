@@ -103,13 +103,17 @@ class LibrarySeatTool(BaseTool):
         return None
 
     async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        query = (context.get("query") or arguments.get("query") or "").strip()
         target = (arguments.get("target") or "").upper()
         room_name = (arguments.get("room_name") or "").strip()
         seat_no = (arguments.get("seat_no") or "").strip()
         room_id = arguments.get("room_id")
 
+        # 0. 쿼리 또는 파라미터에서 스터디룸 의도 자동 보정
+        is_study_intent = "스터디" in query or "스터디" in room_name or target in ["STUDY_ROOMS", "RESERVE_STUDY_ROOM"]
+
         # 1. 좌석 배정 신청 (RESERVE_SEAT)
-        if target == "RESERVE_SEAT" or (seat_no and not target):
+        if target == "RESERVE_SEAT" or (seat_no and not is_study_intent):
             resolved_room_id = room_id or self._resolve_room_id(room_name) or 1
             seat_data = {
                 "roomName": room_name or "제1열람실",
@@ -151,10 +155,11 @@ class LibrarySeatTool(BaseTool):
             }
 
         # 3. 스터디룸 목록 조회 (STUDY_ROOMS)
-        if target == "STUDY_ROOMS" or "스터디" in room_name:
+        if target == "STUDY_ROOMS" or is_study_intent:
             return {
                 "mode": "STUDY_ROOMS",
                 "component_type": "LIBRARY_STUDY_ROOMS",
+                "rooms": STUDY_ROOM_CATALOG,
                 "data": {
                     "rooms": STUDY_ROOM_CATALOG,
                     "notice": "스터디룸 예약은 1회 최대 2시간 가능합니다. (이용 시작 20분 내 입실 필수)",

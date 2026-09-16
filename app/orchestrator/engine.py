@@ -86,6 +86,7 @@ class AgentOrchestrator:
         exec_context = {
             "authorization": (request.client_context or {}).get("authorization", ""),
             "client": request.client,
+            "query": request.message,
         }
 
         # 2. Step 1: Real LLM Reasoning & 1st-hop Plan
@@ -552,11 +553,37 @@ class AgentOrchestrator:
                         )
                     elif tool.category == "LIBRARY" and isinstance(res, dict):
                         tool_data = res
-                        rooms_info = "\n".join([
-                            f"- {r['name']}: 잔여 {r.get('available_seats', r.get('seats', {}).get('available', 0))}석 / 전체 {r.get('total_seats', r.get('seats', {}).get('total', 0))}석"
-                            for r in res.get("rooms", [])
-                        ])
-                        summary_out = f"\n[학산도서관 열람실 실시간 잔여 좌석 현황]:\n{rooms_info}\n"
+                        mode = res.get("mode")
+                        if mode == "STUDY_ROOMS":
+                            study_rooms = res.get("rooms") or res.get("data", {}).get("rooms", [])
+                            rooms_info = "\n".join([
+                                f"- {r.get('name')}: 위치 {r.get('location')}, 수용정원 {r.get('quota')}, 구비시설 ({', '.join(r.get('tags', []))})"
+                                for r in study_rooms
+                            ])
+                            notice = res.get("data", {}).get("notice") or res.get("notice", "")
+                            summary_out = (
+                                f"\n[학산도서관 스터디룸 목록 및 예약 안내]:\n"
+                                f"{rooms_info}\n"
+                                f"- 이용 규정: {notice}\n"
+                                f"💡 지침: 학생에게 위 스터디룸 목록을 친절히 안내하고, 대화창의 [학산도서관 스터디룸] 카드에서 원하는 방을 터치하면 바로 예약 화면으로 연결된다고 설명하세요.\n"
+                            )
+                        elif mode in ["RESERVE_SEAT", "RESERVE_STUDY_ROOM"]:
+                            summary_out = (
+                                f"\n[학산도서관 대화형 신청 카드 발급 완료]:\n"
+                                f"{res.get('instruction', '')}\n"
+                            )
+                        else:
+                            rooms = res.get("rooms", [])
+                            rooms_info = "\n".join([
+                                f"- {r.get('name', '')}: 잔여 {r.get('available_seats', r.get('seats', {}).get('available', 0))}석 / 전체 {r.get('total_seats', r.get('seats', {}).get('total', 0))}석"
+                                for r in rooms
+                            ])
+                            summary_out = (
+                                f"\n[학산도서관 열람실 실시간 잔여 좌석 현황 (공식 pyxis 시스템 실시간 관측 데이터)]:\n"
+                                f"{rooms_info}\n"
+                                f"⚠️ 지침: 반드시 위 실제 실시간 잔여 좌석 수치 그대로 학생에게 안내하세요 (임의의 숫자를 지어내지 마세요). "
+                                f"대화창 아래 제공된 실시간 열람실 카드에서 원하는 열람실을 터치하면 좌석 배정 화면으로 이동할 수 있음을 덧붙이세요.\n"
+                            )
                     elif tool.category == "CAMPUS_WATCH" and isinstance(res, dict):
                         tool_data = res
                         summary_out = f"\n[학산도서관 실시간 빈자리 알림/스나이퍼 감시 결과]:\n{res.get('summary', '')}\n"

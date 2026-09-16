@@ -484,7 +484,15 @@ class CardSynthesizer:
             if comp_type:
                 comp_data = data.get("data") or {}
                 link_info = data.get("link") or {"label": "학산도서관 좌석 배정", "route": "/services/library"}
-                card_title = "학산도서관 좌석 배정 신청 확인" if comp_type == "LIBRARY_SEAT_CONFIRM" else "학산도서관 스터디룸 예약 확인" if comp_type == "LIBRARY_STUDY_ROOM_CONFIRM" else "학산도서관"
+                if comp_type == "LIBRARY_SEAT_CONFIRM":
+                    card_title = "학산도서관 좌석 배정 신청 확인"
+                elif comp_type == "LIBRARY_STUDY_ROOM_CONFIRM":
+                    card_title = "학산도서관 스터디룸 예약 확인"
+                elif comp_type == "LIBRARY_STUDY_ROOMS":
+                    card_title = "학산도서관 스터디룸"
+                else:
+                    card_title = "학산도서관"
+
                 return ComponentCard(
                     type=comp_type,
                     title=card_title,
