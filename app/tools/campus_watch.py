@@ -87,24 +87,29 @@ class CampusWatchTool(BaseTool):
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
 
+        candidate_urls = [self.portal_server_url, "https://intip.inuappcenter.kr"]
+
         # 1. 감시 목록 조회
         if action == "LIST":
-            try:
-                async with httpx.AsyncClient(timeout=4.0) as client:
-                    resp = await client.get(
-                        f"{self.portal_server_url}/api/v1/agent/watch-jobs",
-                        headers=headers,
-                    )
-                    if resp.status_code == 200:
-                        res_json = resp.json()
-                        jobs = res_json.get("data") or []
-                        return {
-                            "component_type": "CAMPUS_WATCH_LIST",
-                            "data": {"jobs": jobs},
-                            "summary": f"현재 진행 중인 실시간 빈자리 감시 작업은 총 {len(jobs)}건입니다.",
-                        }
-            except Exception as ex:
-                logger.warning(f"Failed to fetch watch jobs from inu-portal-server: {ex}")
+            for base_url in candidate_urls:
+                if not base_url:
+                    continue
+                try:
+                    async with httpx.AsyncClient(timeout=4.0) as client:
+                        resp = await client.get(
+                            f"{base_url.rstrip('/')}/api/v1/agent/watch-jobs",
+                            headers=headers,
+                        )
+                        if resp.status_code == 200:
+                            res_json = resp.json()
+                            jobs = res_json.get("data") or []
+                            return {
+                                "component_type": "CAMPUS_WATCH_LIST",
+                                "data": {"jobs": jobs},
+                                "summary": f"현재 진행 중인 실시간 빈자리 감시 작업은 총 {len(jobs)}건입니다.",
+                            }
+                except Exception as ex:
+                    logger.warning(f"Failed to fetch watch jobs from {base_url}: {ex}")
 
             return {
                 "component_type": "CAMPUS_WATCH_LIST",
@@ -119,18 +124,21 @@ class CampusWatchTool(BaseTool):
                 return {
                     "summary": "취소할 감시 작업 ID가 지정되지 않았습니다. 감시 목록을 먼저 확인해 주세요.",
                 }
-            try:
-                async with httpx.AsyncClient(timeout=4.0) as client:
-                    resp = await client.delete(
-                        f"{self.portal_server_url}/api/v1/agent/watch-jobs/{job_id}",
-                        headers=headers,
-                    )
-                    if resp.status_code in [200, 204]:
-                        return {
-                            "summary": f"감시 작업(ID: {job_id})이 성공적으로 취소되었습니다.",
-                        }
-            except Exception as ex:
-                logger.warning(f"Failed to cancel watch job: {ex}")
+            for base_url in candidate_urls:
+                if not base_url:
+                    continue
+                try:
+                    async with httpx.AsyncClient(timeout=4.0) as client:
+                        resp = await client.delete(
+                            f"{base_url.rstrip('/')}/api/v1/agent/watch-jobs/{job_id}",
+                            headers=headers,
+                        )
+                        if resp.status_code in [200, 204]:
+                            return {
+                                "summary": f"감시 작업(ID: {job_id})이 성공적으로 취소되었습니다.",
+                            }
+                except Exception as ex:
+                    logger.warning(f"Failed to cancel watch job on {base_url}: {ex}")
             return {
                 "summary": f"감시 작업(ID: {job_id}) 취소 요청을 전달했습니다.",
             }
@@ -170,36 +178,57 @@ class CampusWatchTool(BaseTool):
         server_job_data = None
 
         if clean_token:
-            try:
-                payload = {
-                    "domain": domain,
-                    "targetId": full_target_name,
-                    "targetName": full_target_name,
-                    "durationMinutes": duration,
-                }
-                async with httpx.AsyncClient(timeout=4.0) as client:
-                    resp = await client.post(
-                        f"{self.portal_server_url}/api/v1/agent/watch-jobs",
-                        headers=headers,
-                        json=payload,
-                    )
-                    if resp.status_code in [200, 201]:
-                        server_job_data = resp.json().get("data")
-            except Exception as ex:
-                logger.info(f"Server watch registration fallback to client-side card: {ex}")
+            payload = {
+                "domain": domain,
+                "targetId": full_target_name,
+                "targetName": full_target_name,
+                "durationMinutes": duration,
+            }
+            for base_url in candidate_urls:
+                if not base_url:
+                    continue
+                try:
+                    async with httpx.AsyncClient(timeout=4.0) as client:
+                        resp = await client.post(
+                            f"{base_url.rstrip('/')}/api/v1/agent/watch-jobs",
+                            headers=headers,
+                            json=payload,
+                        )
+                        if resp.status_code in [200, 201]:
+                            server_job_data = resp.json().get("data")
+                            break
+                except Exception as ex:
+                    logger.info(f"Server watch registration attempt failed on {base_url}: {ex}")
 
-        card_data = {
+        if server_job_data:
+            card_data = {
+                "targetName": full_target_name,
+                "remainingMinutes": duration,
+                "domain": domain,
+                "job": server_job_data,
+            }
+            return {
+                "component_type": "CAMPUS_WATCH_RESULT",
+                "data": card_data,
+                "summary": (
+                    f"학산도서관 [{full_target_name}] 실시간 빈자리 감시(스나이퍼)를 시작했습니다! 🎯\n"
+                    f"서버에서 최대 {duration}분 동안 모니터링하며, 빈자리가 발생하는 즉시 푸시 알림으로 알려드릴게요.\n"
+                    f"설정된 감시는 앱의 [스마트 감시 관리] 메뉴에서 언제든 확인하고 취소할 수 있습니다."
+                ),
+            }
+
+        # 서버 푸시 등록이 실패했거나 토큰이 없는 경우 로컬 감시 카드로 안전하게 대체
+        local_data = {
+            "watchType": "SPECIFIC_SEAT_SNIPER",
             "targetName": full_target_name,
-            "remainingMinutes": duration,
-            "domain": domain,
-            "job": server_job_data or {"remainingMinutes": duration, "targetName": full_target_name},
+            "roomId": room_id,
+            "durationMinutes": duration,
         }
-
         return {
-            "component_type": "CAMPUS_WATCH_RESULT",
-            "data": card_data,
+            "component_type": "LOCAL_WATCH_ACTION",
+            "data": local_data,
             "summary": (
-                f"학산도서관 [{full_target_name}] 실시간 빈자리 감시(스나이퍼)를 시작했습니다! 🎯\n"
-                f"최대 {duration}분 동안 안전하게 모니터링하며, 빈자리가 발생하는 즉시 푸시 알림으로 알려드릴게요."
+                f"학산도서관 [{full_target_name}] 빈자리 감시 카드가 준비되었습니다. "
+                f"아래 카드의 [감시 등록] 버튼을 눌러 기기 알림을 활성화해 주세요."
             ),
         }

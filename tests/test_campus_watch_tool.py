@@ -25,15 +25,16 @@ async def test_campus_watch_local_action_execution():
     assert res["data"]["seatNo"] == "12"
 
 @pytest.mark.asyncio
-async def test_campus_watch_room_execution():
+async def test_campus_watch_room_fallback_execution():
     tool = CampusWatchTool()
     res = await tool.execute({
         "action": "WATCH",
         "target_name": "힐링존",
         "duration_minutes": 60,
     })
-    assert res["component_type"] == "CAMPUS_WATCH_RESULT"
-    assert res["data"]["targetName"] == "힐링존"
+    # When no token or server unreachable, securely falls back to LOCAL_WATCH_ACTION
+    assert res["component_type"] == "LOCAL_WATCH_ACTION"
+    assert "힐링존" in res["data"]["targetName"]
 
 def test_auth_required_card_synthesis():
     portal_card = CardSynthesizer.synthesize_for_domain("PORTAL", data="AUTH_REQUIRED")
