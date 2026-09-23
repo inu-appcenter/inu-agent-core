@@ -84,3 +84,21 @@ async def test_extract_tool_arguments_fallback_from_client_context():
         client_context=client_context,
     )
     assert args.get("query") == "이순신"
+
+
+@pytest.mark.asyncio
+async def test_extract_tool_arguments_park_moon_ju_scenario():
+    tool = MockDirectoryTool()
+    history = [
+        {"role": "user", "content": "내 담임교수님 누구야?"},
+        {"role": "assistant", "content": "학우님의 지도교수님은 **박문주 교수님**입니다."},
+    ]
+    # User asks very short: "전화번호?" or "전화번호 누구야?"
+    args = await AgentRouter.extract_tool_arguments(
+        tool=tool,
+        query="전화번호?",
+        history=history,
+        client_context=None,
+    )
+    assert args.get("query") == "박문주"
+
