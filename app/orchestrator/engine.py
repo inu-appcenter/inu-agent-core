@@ -5,6 +5,7 @@ Integrates Tool Registry, Tool Pruner (Gemma 27B optimization), and ReAct execut
 from typing import AsyncGenerator, List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 import json
+import re
 
 from app.core.logging import logger
 from app.llm.client import llm_client
@@ -182,13 +183,37 @@ class AgentOrchestrator:
                 fn_name = fn.get("name", "")
                 fn_args = fn.get("arguments", {})
 
-                # Match tool from registry
+                # Match tool from registry (Direct, Case-Insensitive, Category, or Alias)
                 target_tool = tool_registry.get_tool(fn_name)
                 if not target_tool:
+                    fn_lower = fn_name.lower().replace("-", "_")
                     for t in tool_registry.list_tools():
-                        if t.name.lower() == fn_name.lower() or t.category.lower() == fn_name.lower():
+                        t_name_lower = t.name.lower()
+                        t_cat_lower = t.category.lower()
+                        if t_name_lower == fn_lower or t_cat_lower == fn_lower:
                             target_tool = t
                             break
+                        # Domain alias matching
+                        if "cafeteria" in fn_lower or "menu" in fn_lower:
+                            if "menu" in t_name_lower or t_cat_lower == "cafeteria":
+                                target_tool = t
+                                break
+                        elif "library" in fn_lower or "seat" in fn_lower or "reading" in fn_lower:
+                            if t_name_lower == "library_reading_rooms_status":
+                                target_tool = t
+                                break
+                        elif "academic" in fn_lower or "schreg" in fn_lower or "portal" in fn_lower:
+                            if "portal_get_academic" in t_name_lower:
+                                target_tool = t
+                                break
+                        elif "contact" in fn_lower or "directory" in fn_lower:
+                            if "searchdirectory" in t_name_lower or "searchcontacts" in t_name_lower or "directory" in t_name_lower:
+                                target_tool = t
+                                break
+                        elif "knowledge" in fn_lower or "inuchat" in fn_lower or "regulation" in fn_lower:
+                            if "knowledge" in t_name_lower or t_cat_lower == "inu_ai_knowledge":
+                                target_tool = t
+                                break
 
                 if not target_tool:
                     logger.warning(f"Tool {fn_name} not found in registry")
