@@ -723,8 +723,14 @@ class AgentOrchestrator:
                     elif tool.category == "DIRECTORY":
                         tool_data = res
                         q_param = str(final_args.get("query") or "").strip()
+                        raw_list = []
+                        if isinstance(res, list):
+                            raw_list = res
+                        elif isinstance(res, dict):
+                            raw_list = res.get("contents") or res.get("items") or (res.get("data", {}).get("contents") if isinstance(res.get("data"), dict) else []) or []
+
                         if "college" in tool.name.lower() or "office" in tool.name.lower():
-                            contacts = res if isinstance(res, list) else (res.get("items", []) if isinstance(res, dict) else [])
+                            contacts = raw_list
                             lines = [f"\n[교내 학과/단과대 사무실(과사) 연락처 조회 결과 (검색어: '{q_param}')]:"]
                             if contacts:
                                 for c in contacts[:5]:
@@ -740,20 +746,20 @@ class AgentOrchestrator:
                             lines.append("💡 지침: 위 학과 사무실 번호는 학과 사무실(과사) 번호이며 교수님 개인 연구실 번호가 아닙니다. 학과 사무실 번호임을 명확히 구분하여 안내하세요.")
                             summary_out = "\n".join(lines) + "\n"
                         else:
-                            entries = res if isinstance(res, list) else (res.get("items", []) if isinstance(res, dict) else [])
+                            entries = raw_list
                             lines = [f"\n[교내 교수/교직원/부서 연락처 검색 결과 (검색어: '{q_param}')]:"]
                             if entries:
                                 for e in entries[:5]:
                                     if isinstance(e, dict):
                                         name = e.get("name") or ""
                                         pos = e.get("position") or ""
-                                        affil = e.get("affiliation") or ""
+                                        affil = e.get("detailAffiliation") or e.get("affiliation") or ""
                                         phone = e.get("phoneNumber") or ""
                                         email = e.get("email") or ""
                                         lines.append(f"- {name} ({pos}, {affil}): 📞 {phone}" + (f", ✉️ {email}" if email else ""))
                             else:
                                 lines.append(f"- 검색어 '{q_param}' 관련 교수/교직원 개인 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다.")
-                            lines.append("💡 지침: 교수님 개인 연락처가 조회되지 않고 학과 사무실 번호만 있는 경우, '{교수명} 교수님의 개인 연락처는 등록되어 있지 않으나, 소속 학과인 {학과명} 학과 사무실({번호})로 문의하실 수 있습니다'라고 맥락을 밝혀 친절히 안내하세요.")
+                                lines.append("💡 지침: 교수님 개인 연락처가 조회되지 않고 학과 사무실 번호만 있는 경우, '{교수명} 교수님의 개인 연락처는 등록되어 있지 않으나, 소속 학과인 {학과명} 학과 사무실({번호})로 문의하실 수 있습니다'라고 맥락을 밝혀 친절히 안내하세요.")
                             summary_out = "\n".join(lines) + "\n"
                     else:
                         tool_data = res

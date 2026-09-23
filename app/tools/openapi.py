@@ -99,13 +99,27 @@ class OpenApiTool(BaseTool):
                 if isinstance(data, dict) and "data" in data:
                     data = data["data"]
 
+                # Extract list if inside ListResponseDto (e.g. {"pages": 1, "total": 2, "contents": [...]})
+                list_payload = None
+                if isinstance(data, list):
+                    list_payload = data
+                elif isinstance(data, dict):
+                    if "contents" in data and isinstance(data["contents"], list):
+                        list_payload = data["contents"]
+                    elif "items" in data and isinstance(data["items"], list):
+                        list_payload = data["items"]
+
                 # Guardrail: truncate large arrays to prevent context window exhaustion
-                if isinstance(data, list) and len(data) > 6:
-                    return {
-                        "total_count": len(data),
-                        "items": data[:6],
-                        "notice": f"결과가 많아 상위 6개 항목만 표시합니다. (전체 {len(data)}건)",
-                    }
+                if list_payload is not None:
+                    if len(list_payload) > 6:
+                        return {
+                            "total_count": len(list_payload),
+                            "items": list_payload[:6],
+                            "contents": list_payload[:6],
+                            "notice": f"결과가 많아 상위 6개 항목만 표시합니다. (전체 {len(list_payload)}건)",
+                        }
+                    elif isinstance(data, dict) and "contents" in data:
+                        data["items"] = list_payload
 
                 return data
             except Exception as e:
