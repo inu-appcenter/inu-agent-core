@@ -46,6 +46,12 @@ def test_is_generic_contact_term():
     assert AgentRouter._is_generic_contact_term("전화번호 알려줘") is True
     assert AgentRouter._is_generic_contact_term("전화번호 누구야") is True
     assert AgentRouter._is_generic_contact_term("연락처") is True
+    assert AgentRouter._is_generic_contact_term("내 담임교수님") is True
+    assert AgentRouter._is_generic_contact_term("담임교수님") is True
+    assert AgentRouter._is_generic_contact_term("내 지도교수") is True
+    assert AgentRouter._is_generic_contact_term("지도교수님 연락처") is True
+    assert AgentRouter._is_generic_contact_term("우리 과사 번호") is True
+    assert AgentRouter._is_generic_contact_term("교수님 연구실 어디야") is True
     assert AgentRouter._is_generic_contact_term("홍길동") is False
     assert AgentRouter._is_generic_contact_term("컴퓨터공학부") is False
 
@@ -87,6 +93,24 @@ async def test_extract_tool_arguments_fallback_from_client_context():
 
 
 @pytest.mark.asyncio
+async def test_extract_tool_arguments_fallback_from_academic_context_single_turn():
+    tool = MockDirectoryTool()
+    academic_context = {
+        "advisor": "홍길동",
+        "departmentName": "컴퓨터공학부",
+    }
+    # Single-turn question: "내 담임교수님 전화번호?"
+    args = await AgentRouter.extract_tool_arguments(
+        tool=tool,
+        query="내 담임교수님 전화번호?",
+        history=[],
+        client_context=None,
+        academic_context=academic_context,
+    )
+    assert args.get("query") == "홍길동"
+
+
+@pytest.mark.asyncio
 async def test_extract_tool_arguments_park_moon_ju_scenario():
     tool = MockDirectoryTool()
     history = [
@@ -101,4 +125,5 @@ async def test_extract_tool_arguments_park_moon_ju_scenario():
         client_context=None,
     )
     assert args.get("query") == "박문주"
+
 

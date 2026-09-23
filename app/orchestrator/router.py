@@ -186,18 +186,32 @@ class AgentRouter:
         messages.append({"role": "user", "content": current_user_msg})
         return messages
 
-    @staticmethod
-    def _is_generic_contact_term(term: Optional[str]) -> bool:
-        if not term or not term.strip():
+    @classmethod
+    def _is_generic_contact_term(cls, term: Optional[str]) -> bool:
+        if not term or not str(term).strip():
             return True
-        norm = re.sub(r"\s+", "", term).lower()
+        norm = re.sub(r"\s+", "", str(term)).lower()
         generic_terms = {
-            "전화번호", "이메일", "연락처", "번호", "연구실", "위치", "사무실", "과사",
-            "지도교수", "지도교수님", "담임교수", "담임교수님", "교수님", "교수", "선생님",
-            "전화번호나이메일", "이메일이나전화번호", "전화번호알려줘", "연락처알려줘", "번호알려줘",
-            "전화번호누구야", "번호누구야", "연락처누구야", "알려줘", "누구야", "어디야", "뭐야"
+            "전화번호", "이메일", "연락처", "번호", "연구실", "위치", "사무실", "과사", "행정실", "교학팀",
+            "지도교수", "지도교수님", "담임교수", "담임교수님", "교수님", "교수", "선생님", "학과장", "학과장님", "학부장", "학부장님",
+            "내지도교수", "내지도교수님", "내담임교수", "내담임교수님", "내교수님", "우리교수님", "담당교수", "담당교수님", "전임교수",
+            "전화번호알려줘", "연락처알려줘", "번호알려줘", "전화번호누구야", "번호누구야", "연락처누구야", "연구실어디야", "위치어디야",
+            "알려줘", "누구야", "어디야", "뭐야", "확인해줘", "찾아줘", "알아", "알아?", "알려줘요", "누군가요", "어디인가요",
+            "전화번호나이메일", "이메일이나전화번호"
         }
-        return norm in generic_terms
+        if norm in generic_terms:
+            return True
+
+        pattern = re.compile(
+            r"^(?:내|우리|해당|소속|담당|전담|지도|담임|대표|관련)*"
+            r"(?:지도교수|담임교수|교수님|교수|선생님|선생|학과장|학부장|과사|학과사무실|사무실|행정실|교학팀)*"
+            r"(?:전화번호|전화|연락처|번호|핸드폰|폰|이메일|메일|연구실|연구실위치|위치|호실|문의)*"
+            r"(?:알려줘|누구야|어디야|뭐야|확인해줘|찾아줘|알아|알아\?|알려줘요|누군가요|어디인가요|어디|뭐)*$"
+        )
+        if pattern.match(norm):
+            return True
+
+        return False
 
     @staticmethod
     def _clean_entity_query(query: Optional[str]) -> str:
@@ -275,15 +289,19 @@ class AgentRouter:
 3. [1인칭 졸업/학사 판정 질의]:
    '나 졸업 가능해?', '나 졸업 요건 돼?', '내 취득학점'처럼 1인칭으로 본인의 졸업/학점을 묻는 질문은,
    학생 본인의 학적(소속 학과, 학번, 취득 학점) 확인이 필수적이므로 먼저 'PORTAL'을 반드시 포함하세요.
-4. [교내 연락처/위치 질의]:
+4. [개인 지도교수/소속 학과의 연락처 복합 질의]:
+   '내 담임교수님 전화번호', '내 지도교수님 연구실 어디야?', '우리 과사 번호 뭐야?'처럼
+   개인 학적(지도교수명/소속학과) 확인과 교내 연락처 조회가 함께 필요한 경우,
+   'PORTAL'과 'DIRECTORY'를 함께 선택하거나 (예: tools: ["PORTAL", "DIRECTORY"]), 'PORTAL'을 선택하세요.
+5. [교내 연락처/위치 질의]:
    교수님, 학과 사무실, 교내 행정부서의 전화번호나 위치/호실을 묻는 질문은 'DIRECTORY' 도구를 선택하세요.
-5. [일반 학과 규정/학칙 질의]:
+6. [일반 학과 규정/학칙 질의]:
    '컴퓨터공학과 졸업 요건 알려줘'처럼 3인칭 또는 일반 학과 규정을 묻는 질문은 개인 학적 조회가 불필요하므로 'INU_AI_KNOWLEDGE'만 선택하세요.
-6. [도서관 열람실 잔여 좌석 및 스터디룸 현황 질의]:
+7. [도서관 열람실 잔여 좌석 및 스터디룸 현황 질의]:
    '열람실 잔여 좌석', '도서관 좌석 현황', '열람실 몇 자리 남았어?', '스터디룸 목록', '스터디룸 예약 가능한 곳' 등 학산도서관의 현재 잔여 좌석이나 스터디룸 관련 질문은 반드시 'LIBRARY' 도구를 선택하세요. (빈자리 푸시 알림/감시 예약 요청이 아닌 단순 현황 질문은 절대 CAMPUS_WATCH가 아닌 LIBRARY를 선택해야 합니다.)
-7. [도서관 빈자리 알림/스나이퍼 질의]:
+8. [도서관 빈자리 알림/스나이퍼 질의]:
    '자리 나면 알려줘', '알림 걸어줘', '취소표 나오면 알려줘', '빈자리 감시'처럼 빈자리 발생 시 푸시 알림/예약을 요구하는 질문은 단순 잔여 좌석 조회가 아니므로 반드시 'CAMPUS_WATCH' 도구를 선택하세요.
-8. [판단 이유 (thought) 작성 및 정직성 규칙]:
+9. [판단 이유 (thought) 작성 및 정직성 규칙]:
    - 반드시 실제 선택한 'tools' 목록에 부합하는 판단 이유만 작성해야 합니다.
    - 질문에 등장했거나 대화 맥락에서 복원된 구체적인 대상(예: 홍길동 교수님 전화번호, 정문 버스, 학생식당 학식 등)을 직접 언급하며 실제 실행할 도구의 목적을 명확히 작성하세요.
 
@@ -408,6 +426,7 @@ class AgentRouter:
         query: str,
         history: Optional[List[Any]] = None,
         client_context: Optional[Dict[str, Any]] = None,
+        academic_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Dynamically extracts tool arguments matching the tool's OpenAPI schema using LLM reasoning,
@@ -493,12 +512,27 @@ class AgentRouter:
             is_generic = cls._is_generic_contact_term(curr_query)
 
             if not curr_query or is_generic:
-                # 1. Fallback from history (Search for professor names / department names in recent turns)
                 resolved_name = None
-                if history:
+
+                # 1. Fallback from academic_context (from 1st-hop PORTAL execution in ReAct chain)
+                if academic_context and isinstance(academic_context, dict):
+                    resolved_name = academic_context.get("advisor") or academic_context.get("advisorProfessorName") or academic_context.get("departmentName")
+
+                # 2. Fallback from client_context (Academic advisor / department)
+                if not resolved_name and client_context:
+                    acad_disp = client_context.get("academicDisplay")
+                    if isinstance(acad_disp, dict):
+                        resolved_name = acad_disp.get("advisorProfessorName") or acad_disp.get("profNm") or acad_disp.get("departmentName") or acad_disp.get("deptName")
+                    if not resolved_name:
+                        acad = client_context.get("academic")
+                        if isinstance(acad, dict):
+                            resolved_name = acad.get("advisorProfessorName") or acad.get("profNm") or acad.get("departmentName") or acad.get("deptName")
+
+                # 3. Fallback from history (Search for professor names / department names in recent turns)
+                if not resolved_name and history:
                     name_pattern = re.compile(r"([가-힣]{2,4})\s*(?:교수님|교수|선생님)")
                     dept_pattern = re.compile(r"([가-힣]+(?:학부|학과|과))")
-                    non_names = {"지도", "담임", "전담", "학과", "학부", "담당", "우리", "해당", "어떤", "무슨", "소속", "모든"}
+                    non_names = {"지도", "담임", "전담", "학과", "학부", "담당", "우리", "해당", "어떤", "무슨", "소속", "모든", "학생", "학우"}
 
                     for h in reversed(history[-6:]):
                         content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else "")
@@ -515,18 +549,8 @@ class AgentRouter:
                                 resolved_name = dept_matches[-1]
                                 break
 
-                # 2. Fallback from client_context (Academic advisor / department)
-                if not resolved_name and client_context:
-                    acad_disp = client_context.get("academicDisplay")
-                    if isinstance(acad_disp, dict):
-                        resolved_name = acad_disp.get("advisorProfessorName") or acad_disp.get("departmentName")
-                    if not resolved_name:
-                        acad = client_context.get("academic")
-                        if isinstance(acad, dict):
-                            resolved_name = acad.get("advisorProfessorName") or acad.get("departmentName")
-
                 if resolved_name:
-                    logger.info(f"Resolved empty query fallback to '{resolved_name}' from conversation/client context")
+                    logger.info(f"Resolved empty/generic query fallback to '{resolved_name}' from conversation/client/academic context")
                     extracted_args["query"] = resolved_name
                 elif is_generic:
                     extracted_args["query"] = ""

@@ -111,30 +111,67 @@ class AgentOrchestrator:
             thinking=initial_thought,
         )
 
-        raw_initial_tools = initial_plan.get("tools", [])
-        first_hop_categories = []
-        for item in raw_initial_tools:
-            if isinstance(item, str):
-                first_hop_categories.append(item.upper())
-            elif isinstance(item, dict):
-                val = item.get("name") or item.get("category") or item.get("tool") or ""
-                if val:
-                    first_hop_categories.append(str(val).upper())
+        def resolve_tools_from_plan(
+            raw_tools: List[Any],
+            candidate_list: List[BaseTool],
+            executed_cats: set,
+            executed_names: set,
+        ) -> List[BaseTool]:
+            all_registered = tool_registry.list_tools()
+            resolved = []
+            for item in raw_tools:
+                val = item if isinstance(item, str) else (item.get("name") or item.get("category") or item.get("tool") or "")
+                if not val:
+                    continue
+                val_str = str(val).strip()
+                val_upper = val_str.upper()
+                clean_cat = re.sub(r"\(.*?\)", "", val_upper).strip()
 
-        # Filter 1st-hop tools to execute
-        first_tools = []
-        for cat in first_hop_categories:
-            matching = [t for t in candidate_tools if t.category.upper() == cat]
-            if matching:
-                first_tools.extend(matching)
-            else:
-                cat_tools = tool_registry.get_tools_by_category(cat)
+                # 1. Exact Category in candidate_list
+                matching = [t for t in candidate_list if (t.category.upper() == val_upper or t.category.upper() == clean_cat) and t.name not in executed_names]
+                if matching:
+                    for t in matching:
+                        if t not in resolved:
+                            resolved.append(t)
+                    continue
+
+                # 2. Exact Category in all_registered
+                cat_tools = [t for t in all_registered if (t.category.upper() == val_upper or t.category.upper() == clean_cat) and t.name not in executed_names]
                 if cat_tools:
-                    first_tools.extend(cat_tools)
-                else:
-                    reg_tool = tool_registry.get_tool(cat.lower())
-                    if reg_tool:
-                        first_tools.append(reg_tool)
+                    for t in cat_tools:
+                        if t not in resolved:
+                            resolved.append(t)
+                    continue
+
+                # 3. Exact or prefix tool name in all_registered
+                name_tools = [t for t in all_registered if (t.name.lower() == val_str.lower() or val_str.lower() in t.name.lower() or t.name.lower() in val_str.lower()) and t.name not in executed_names]
+                if name_tools:
+                    for t in name_tools:
+                        if t not in resolved:
+                            resolved.append(t)
+                    continue
+
+                # 4. Partial category match
+                partial_tools = [
+                    t for t in all_registered
+                    if (t.category.upper() in val_upper or val_upper in t.category.upper())
+                    and t.name not in executed_names
+                ]
+                if partial_tools:
+                    for t in partial_tools:
+                        if t not in resolved:
+                            resolved.append(t)
+                    continue
+
+            return resolved
+
+        raw_initial_tools = initial_plan.get("tools", [])
+        first_tools = resolve_tools_from_plan(
+            raw_tools=raw_initial_tools,
+            candidate_list=candidate_tools,
+            executed_cats=set(),
+            executed_names=set(),
+        )
 
         # Fallback if no matching tools found
         if not first_tools and candidate_tools:
@@ -175,18 +212,19 @@ class AgentOrchestrator:
             history=request.history,
             current_observation=tool_summary_text,
             executed_categories=list(executed_categories),
-            available_tools=candidate_tools,
+            available_tools=tool_registry.list_tools(),
         )
 
         sec_thought = sec_plan.get("thought", "").strip()
         raw_sec_tools = sec_plan.get("tools", [])
-        sec_categories = []
-        for item in raw_sec_tools:
-            name_val = item if isinstance(item, str) else (item.get("name") or item.get("category") or item.get("tool") or "")
-            if name_val and str(name_val).upper() not in executed_categories:
-                sec_categories.append(str(name_val).upper())
+        second_tools = resolve_tools_from_plan(
+            raw_tools=raw_sec_tools,
+            candidate_list=candidate_tools,
+            executed_cats=executed_categories,
+            executed_names=executed_tool_names,
+        )
 
-        if sec_categories:
+        if second_tools:
             if sec_thought:
                 yield AgentStreamEvent(
                     event_type="THINKING",
@@ -194,17 +232,6 @@ class AgentOrchestrator:
                 )
 
             # Execute 2nd-hop tools
-            second_tools = []
-            for cat in sec_categories:
-                matching = [t for t in candidate_tools if t.category.upper() == cat]
-                if matching:
-                    second_tools.extend(matching)
-                else:
-                    for t in tool_registry.list_tools():
-                        if t.category.upper() == cat and t.name not in executed_tool_names:
-                            second_tools.append(t)
-                            break
-
             for tool in second_tools:
                 async for event, summary, ac_data, rag_data in self._execute_tool(
                     tool=tool,
@@ -553,6 +580,7 @@ class AgentOrchestrator:
                 query=request.message,
                 history=request.history,
                 client_context=request.client_context,
+                academic_context=academic_context,
             )
 
             bus_meta = tool_args.pop("_meta", None) if tool.category == "BUS" else None
