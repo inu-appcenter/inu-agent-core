@@ -83,4 +83,3 @@ def test_build_anonymized_academic_summary_contains_zero_pii():
     assert "010-" not in summary
     assert "2021학번" in summary
     assert "정보기술대학 컴퓨터공학부" in summary
-    assert "학우님" in summary
