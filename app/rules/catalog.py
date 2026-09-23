@@ -130,4 +130,31 @@ DEFAULT_ACTION_RULES: Dict[str, ActionRule] = {
         ),
         default_card_type="LIST_CARD",
     ),
+    "PORTAL_GET_STUDENT_TIMETABLE": ActionRule(
+        action_id="PORTAL_GET_STUDENT_TIMETABLE",
+        domain="PORTAL",
+        protocol="NEXACRO_SSV",
+        title="학생별 수강 시간표 조회",
+        description="포털 종합정보시스템(ERP)에서 수강 신청 교과목, 강의실, 강의 시간표 목록을 조회합니다.",
+        version="1.0.0",
+        target=RuleTarget(
+            url="/uni/cour/CorrCtr/findStdSukangAplyList.do",
+            method="POST",
+            params={"menuId": "M003150", "pgmId": "P001416"},
+            headers={"REQFOUNDATAION": "nexacro", "Content-Type": "text/plain; charset=UTF-8"},
+            body_template={
+                "dataset": "DS_COND",
+                "columns": ["deptClsfCd", "yy", "tmGbn", "stuno", "korNm", "pageType"],
+                "values": {
+                    "deptClsfCd": "0000587",
+                    "pageType": "sukang"
+                }
+            },
+        ),
+        privacy=PrivacyPolicy(
+            mask_fields=["studentNumber"],
+            retention="TRANSIENT",
+        ),
+        default_card_type="LIST_CARD",
+    ),
 }
