@@ -207,6 +207,28 @@ class LLMClient:
                         }
                     })
 
+                # Fallback: If no structured tool_calls returned, inspect content for open-source tool calling tags or JSON
+                if not parsed_tool_calls and content:
+                    import re
+                    # Pattern 1: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+                    tc_matches = re.findall(r"<tool_call>(.*?)</tool_call>", content, re.DOTALL)
+                    for idx, tc_text in enumerate(tc_matches):
+                        try:
+                            tc_json = json.loads(tc_text.strip())
+                            fn_name = tc_json.get("name") or tc_json.get("function", {}).get("name", "")
+                            fn_args = tc_json.get("arguments") or tc_json.get("function", {}).get("arguments", {})
+                            if fn_name:
+                                parsed_tool_calls.append({
+                                    "id": f"call_text_{idx}_{abs(hash(fn_name)) % 10000}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": fn_name,
+                                        "arguments": fn_args if isinstance(fn_args, dict) else {},
+                                    }
+                                })
+                        except Exception:
+                            pass
+
                 thought = reasoning_content
                 if not thought and content and "<thought>" in content:
                     import re

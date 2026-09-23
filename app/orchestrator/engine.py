@@ -10,6 +10,7 @@ from app.core.logging import logger
 from app.llm.client import llm_client
 from app.llm.schemas import ChatRequest, AgentStreamEvent
 from app.orchestrator.prompts import (
+    get_tool_orchestration_prompt,
     get_system_prompt_for_client,
     is_out_of_scope_question,
     OUT_OF_SCOPE_REFUSAL_MESSAGE,
@@ -114,17 +115,10 @@ class AgentOrchestrator:
         # 2. Build initial conversation messages & OpenAI tool schemas
         openai_tools = [t.get_schema() for t in candidate_tools]
 
-        system_prompt = get_system_prompt_for_client(request.client)
-        tool_guideline = (
-            "\n\n[도구 사용 및 ReAct 자율 실행 원칙]:\n"
-            "1. 사용자의 질문을 해결하기 위해 필요한 도구가 있다면 주저하지 말고 제공된 도구(Tools)를 적절한 인자와 함께 호출하세요.\n"
-            "2. 학생 개인의 학적(지도교수, 학번, 성적, 취득학점) 또는 LMS 과제가 필요한 경우 반드시 해당 도구(action_portal_view_academic, action_lms_get_activities 등)를 먼저 호출하세요.\n"
-            "3. 도구 실행 결과를 받은 후, 질문을 완전히 해결하기 위해 추가 도구(예: 지도교수명 확인 후 전화번호부 검색)가 필요하면 연쇄적으로 다음 도구를 호출하세요.\n"
-            "4. 모든 정보가 수집되었거나 도구 호출이 불필요한 경우, 도구를 호출하지 않고 최종 답변을 작성하세요."
-        )
+        orchestration_prompt = get_tool_orchestration_prompt(request.client)
 
         messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_prompt + tool_guideline}
+            {"role": "system", "content": orchestration_prompt}
         ]
 
         if request.history:
@@ -316,8 +310,13 @@ class AgentOrchestrator:
             {"role": "system", "content": final_system_prompt}
         ]
 
-        for msg in request.history:
-            messages.append({"role": msg.role, "content": msg.content})
+        if request.history:
+            for h in request.history[-6:]:
+                role = getattr(h, "role", None) or (h.get("role") if isinstance(h, dict) else "user")
+                content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else "")
+                if content:
+                    clean_role = "assistant" if role == "assistant" else "user"
+                    synthesis_messages.append({"role": clean_role, "content": content})
 
         synthesis_messages.append({"role": "user", "content": request.message})
 
@@ -375,7 +374,14 @@ class AgentOrchestrator:
 
             domain_data = None
             if tool.category == "PORTAL":
-                domain_data = client_ctx.get("academic") or client_ctx.get("academicDisplay")
+                domain_data = (
+                    client_ctx.get("academic")
+                    or client_ctx.get("academicDisplay")
+                    or client_ctx.get("studentInfo")
+                    or client_ctx.get("student")
+                )
+                if not domain_data and ("departmentName" in client_ctx or "advisorProfessorName" in client_ctx):
+                    domain_data = client_ctx
             else:
                 domain_data = client_ctx.get("lms")
 
@@ -411,14 +417,18 @@ class AgentOrchestrator:
                         "advisor": advisor,
                     }
 
+                    advisor_hint = ""
+                    if advisor:
+                        advisor_hint = f"- 지도교수: {advisor} 교수님 (연락처/전화번호 조회가 필요한 경우 `api_searchContacts(query='{advisor}')` 도구를 호출하세요.)\n"
+
                     summary_out = (
                         f"\n[포털 종합정보(ERP) 학생 실제 학적 연동 데이터]:\n"
                         f"- 성명/소속: {name}님 ({colg} {dept})\n"
                         f"- 학적 상태: {status_display}" + (f" (이수 학기: {sem})" if sem else "") + "\n"
                         f"- 취득 학점: {credits}학점 (평점 평균: {gpa})\n"
                         f"- 입학 정보: {entry}학번\n"
-                        + (f"- 지도교수: {advisor} 교수님\n" if advisor else "")
-                        + f"- [응답 지침]: 위 연동된 실제 학적 및 학점 데이터를 바탕으로 학생의 질문에 정확하고 친절하게 답변하세요.\n"
+                        + advisor_hint
+                        + f"- [응답 지침]: 위 연동된 실제 학적 데이터를 바탕으로 학생의 질문에 정확히 답변하세요. 교수님 연락처가 필요하면 `api_searchContacts`를 연쇄 호출하세요.\n"
                     )
                 elif tool.category == "LMS" and isinstance(domain_data, (dict, list)):
                     events = []
