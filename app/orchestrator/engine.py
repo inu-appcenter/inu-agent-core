@@ -67,8 +67,8 @@ def resolve_tool_display_name(category: str, name: str) -> str:
 class AgentOrchestrator:
     async def run_stream(self, request: ChatRequest) -> AsyncGenerator[AgentStreamEvent, None]:
         """
-        Execute streaming chat with intent handling, autonomous ReAct chaining,
-        real LLM reasoning thoughts, and INUChat direct pass-through.
+        Execute streaming chat with Native OpenAI Tool Calling, autonomous ReAct chaining,
+        SDUI generative card synthesis, and INUChat direct pass-through.
         """
         # 0. Out-of-scope hard guardrail (Coding, pure math, unrelated universities)
         if is_out_of_scope_question(request.message):
@@ -84,8 +84,21 @@ class AgentOrchestrator:
         candidate_tools = await tool_retriever.retrieve(
             query=request.message,
             history=request.history,
-            top_k=6,
+            top_k=8,
         )
+
+        # Ensure essential core domain tools are available in the candidate pool
+        core_categories = [
+            "PORTAL", "LMS", "DIRECTORY", "INU_AI_KNOWLEDGE", "LIBRARY",
+            "CAFETERIA", "BUS", "TIMETABLE", "CAMPUS_WATCH", "NOTICE", "SCHEDULE"
+        ]
+        existing_cats = {t.category.upper() for t in candidate_tools}
+        for cat in core_categories:
+            if cat not in existing_cats:
+                cat_tools = tool_registry.get_tools_by_category(cat)
+                if cat_tools:
+                    candidate_tools.append(cat_tools[0])
+                    existing_cats.add(cat)
 
         client_ctx = request.client_context or {}
         raw_token = client_ctx.get("auth") or client_ctx.get("authorization", "")
@@ -98,84 +111,31 @@ class AgentOrchestrator:
             "query": request.message,
         }
 
-        # 2. Step 1: Real LLM Reasoning & 1st-hop Plan
-        initial_plan = await AgentRouter.decide_initial_plan(
-            query=request.message,
-            history=request.history,
-            candidate_tools=candidate_tools,
+        # 2. Build initial conversation messages & OpenAI tool schemas
+        openai_tools = [t.get_schema() for t in candidate_tools]
+
+        system_prompt = get_system_prompt_for_client(request.client)
+        tool_guideline = (
+            "\n\n[도구 사용 및 ReAct 자율 실행 원칙]:\n"
+            "1. 사용자의 질문을 해결하기 위해 필요한 도구가 있다면 주저하지 말고 제공된 도구(Tools)를 적절한 인자와 함께 호출하세요.\n"
+            "2. 학생 개인의 학적(지도교수, 학번, 성적, 취득학점) 또는 LMS 과제가 필요한 경우 반드시 해당 도구(action_portal_view_academic, action_lms_get_activities 등)를 먼저 호출하세요.\n"
+            "3. 도구 실행 결과를 받은 후, 질문을 완전히 해결하기 위해 추가 도구(예: 지도교수명 확인 후 전화번호부 검색)가 필요하면 연쇄적으로 다음 도구를 호출하세요.\n"
+            "4. 모든 정보가 수집되었거나 도구 호출이 불필요한 경우, 도구를 호출하지 않고 최종 답변을 작성하세요."
         )
 
-        initial_thought = initial_plan.get("thought") or f"'{request.message[:20]}...' 질문을 해결하기 위해 필요한 캠퍼스 시스템을 확인하고 있습니다."
-        yield AgentStreamEvent(
-            event_type="THINKING",
-            thinking=initial_thought,
-        )
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": system_prompt + tool_guideline}
+        ]
 
-        def resolve_tools_from_plan(
-            raw_tools: List[Any],
-            candidate_list: List[BaseTool],
-            executed_cats: set,
-            executed_names: set,
-        ) -> List[BaseTool]:
-            all_registered = tool_registry.list_tools()
-            resolved = []
-            for item in raw_tools:
-                val = item if isinstance(item, str) else (item.get("name") or item.get("category") or item.get("tool") or "")
-                if not val:
-                    continue
-                val_str = str(val).strip()
-                val_upper = val_str.upper()
-                clean_cat = re.sub(r"\(.*?\)", "", val_upper).strip()
+        if request.history:
+            for h in request.history[-6:]:
+                role = getattr(h, "role", None) or (h.get("role") if isinstance(h, dict) else "user")
+                content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else "")
+                if content:
+                    clean_role = "assistant" if role == "assistant" else "user"
+                    messages.append({"role": clean_role, "content": content})
 
-                # 1. Exact Category in candidate_list
-                matching = [t for t in candidate_list if (t.category.upper() == val_upper or t.category.upper() == clean_cat) and t.name not in executed_names]
-                if matching:
-                    for t in matching:
-                        if t not in resolved:
-                            resolved.append(t)
-                    continue
-
-                # 2. Exact Category in all_registered
-                cat_tools = [t for t in all_registered if (t.category.upper() == val_upper or t.category.upper() == clean_cat) and t.name not in executed_names]
-                if cat_tools:
-                    for t in cat_tools:
-                        if t not in resolved:
-                            resolved.append(t)
-                    continue
-
-                # 3. Exact or prefix tool name in all_registered
-                name_tools = [t for t in all_registered if (t.name.lower() == val_str.lower() or val_str.lower() in t.name.lower() or t.name.lower() in val_str.lower()) and t.name not in executed_names]
-                if name_tools:
-                    for t in name_tools:
-                        if t not in resolved:
-                            resolved.append(t)
-                    continue
-
-                # 4. Partial category match
-                partial_tools = [
-                    t for t in all_registered
-                    if (t.category.upper() in val_upper or val_upper in t.category.upper())
-                    and t.name not in executed_names
-                ]
-                if partial_tools:
-                    for t in partial_tools:
-                        if t not in resolved:
-                            resolved.append(t)
-                    continue
-
-            return resolved
-
-        raw_initial_tools = initial_plan.get("tools", [])
-        first_tools = resolve_tools_from_plan(
-            raw_tools=raw_initial_tools,
-            candidate_list=candidate_tools,
-            executed_cats=set(),
-            executed_names=set(),
-        )
-
-        # Fallback if no matching tools found
-        if not first_tools and candidate_tools:
-            first_tools = candidate_tools[:2]
+        messages.append({"role": "user", "content": request.message})
 
         executed_categories = set()
         executed_tool_names = set()
@@ -185,56 +145,71 @@ class AgentOrchestrator:
         academic_data_dict = {}
         inuchat_rag_data = None
 
-        # Execute 1st-hop tools
-        for tool in first_tools:
-            async for event, summary, ac_data, rag_data in self._execute_tool(
-                tool=tool,
-                request=request,
-                exec_context=exec_context,
-                emitted_cards=emitted_cards,
-                emitted_actions=emitted_actions,
-            ):
-                if event:
-                    yield event
-                if summary:
-                    tool_summary_text += summary
-                if ac_data:
-                    academic_data_dict.update(ac_data)
-                if rag_data:
-                    inuchat_rag_data = rag_data
+        # 3. Native Tool Calling ReAct Loop (Autonomous Multi-Hop)
+        MAX_HOPS = 4
+        for hop in range(MAX_HOPS):
+            try:
+                response = await llm_client.chat_with_tools(
+                    messages=messages,
+                    tools=openai_tools,
+                    tool_choice="auto",
+                    temperature=0.1,
+                )
+            except Exception as ex:
+                logger.warning(f"LLM tool calling step {hop + 1} failed: {ex}")
+                break
 
-            executed_categories.add(tool.category.upper())
-            executed_tool_names.add(tool.name)
+            thought = response.get("thought") or ""
+            content = response.get("content") or ""
+            tool_calls = response.get("tool_calls") or []
 
-        # 3. Step 2: ReAct Autonomous Chaining (Sufficiency Check)
-        sec_plan = await AgentRouter.decide_secondary_plan(
-            query=request.message,
-            history=request.history,
-            current_observation=tool_summary_text,
-            executed_categories=list(executed_categories),
-            available_tools=tool_registry.list_tools(),
-        )
-
-        sec_thought = sec_plan.get("thought", "").strip()
-        raw_sec_tools = sec_plan.get("tools", [])
-        second_tools = resolve_tools_from_plan(
-            raw_tools=raw_sec_tools,
-            candidate_list=candidate_tools,
-            executed_cats=executed_categories,
-            executed_names=executed_tool_names,
-        )
-
-        if second_tools:
-            if sec_thought:
+            if thought:
                 yield AgentStreamEvent(
                     event_type="THINKING",
-                    thinking=sec_thought,
+                    thinking=thought,
                 )
 
-            # Execute 2nd-hop tools
-            for tool in second_tools:
+            if not tool_calls:
+                # No more tools needed, proceed to final response
+                break
+
+            # Append assistant's tool-calling message to history
+            raw_msg = response.get("raw_message") or {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls,
+            }
+            messages.append(raw_msg)
+
+            # Execute all requested tool calls in this hop
+            for tc in tool_calls:
+                tc_id = tc.get("id")
+                fn = tc.get("function", {})
+                fn_name = fn.get("name", "")
+                fn_args = fn.get("arguments", {})
+
+                # Match tool from registry
+                target_tool = tool_registry.get_tool(fn_name)
+                if not target_tool:
+                    for t in tool_registry.list_tools():
+                        if t.name.lower() == fn_name.lower() or t.category.lower() == fn_name.lower():
+                            target_tool = t
+                            break
+
+                if not target_tool:
+                    logger.warning(f"Tool {fn_name} not found in registry")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "name": fn_name,
+                        "content": json.dumps({"error": f"Tool {fn_name} not found"}, ensure_ascii=False),
+                    })
+                    continue
+
+                tool_obs = ""
                 async for event, summary, ac_data, rag_data in self._execute_tool(
-                    tool=tool,
+                    tool=target_tool,
+                    tool_args=fn_args,
                     request=request,
                     exec_context=exec_context,
                     emitted_cards=emitted_cards,
@@ -245,20 +220,29 @@ class AgentOrchestrator:
                         yield event
                     if summary:
                         tool_summary_text += summary
+                        tool_obs += summary
                     if ac_data:
                         academic_data_dict.update(ac_data)
                     if rag_data:
                         inuchat_rag_data = rag_data
 
-                executed_categories.add(tool.category.upper())
-                executed_tool_names.add(tool.name)
-        elif sec_thought:
-            yield AgentStreamEvent(
-                event_type="THINKING",
-                thinking=sec_thought,
-            )
+                executed_categories.add(target_tool.category.upper())
+                executed_tool_names.add(target_tool.name)
 
-        # 4. Step 3: Response Streaming Strategy
+                if not tool_obs:
+                    tool_obs = json.dumps(
+                        academic_data_dict if target_tool.category == "PORTAL" else {"status": "success"},
+                        ensure_ascii=False
+                    )
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "name": fn_name,
+                    "content": tool_obs,
+                })
+
+        # 4. Response Streaming Strategy
         # Case 1: Pure Academic Regulation / Graduation query -> INUChat Direct Pass-through
         other_campus_domains = {
             "BUS", "CAFETERIA", "TIMETABLE", "WEATHER", "LIBRARY", "DIRECTORY", "CAMPUS_WATCH",
@@ -326,23 +310,23 @@ class AgentOrchestrator:
                 "함께 조회된 다른 도구(학식, 버스 등)의 추가적인 팩트는 자연스럽게 곁들여서 하나의 친절하고 완성된 답변으로 작성하세요."
             )
 
-        system_prompt = get_system_prompt_for_client(request.client, tool_summary=tool_summary_text) + additional_guideline
+        final_system_prompt = get_system_prompt_for_client(request.client, tool_summary=tool_summary_text) + additional_guideline
 
-        messages = [
-            {"role": "system", "content": system_prompt}
+        synthesis_messages = [
+            {"role": "system", "content": final_system_prompt}
         ]
 
         for msg in request.history:
             messages.append({"role": msg.role, "content": msg.content})
 
-        messages.append({"role": "user", "content": request.message})
+        synthesis_messages.append({"role": "user", "content": request.message})
 
         try:
             logger.info(
                 f"Starting synthesis stream for '{request.message[:30]}...' (Categories: {executed_categories})"
             )
 
-            async for token in llm_client.stream_chat(messages=messages):
+            async for token in llm_client.stream_chat(messages=synthesis_messages):
                 yield AgentStreamEvent(event_type="TOKEN", content=token)
 
             yield AgentStreamEvent(event_type="DONE")
@@ -353,6 +337,7 @@ class AgentOrchestrator:
     async def _execute_tool(
         self,
         tool: BaseTool,
+        tool_args: Dict[str, Any],
         request: ChatRequest,
         exec_context: Dict[str, Any],
         emitted_cards: set,
@@ -550,17 +535,6 @@ class AgentOrchestrator:
 
         # Case B: Server OpenAPI / Direct Tools
         elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY", "CAMPUS_WATCH", "REMINDER", "DAILY_BRIEF", "KEYWORD", "SETTINGS"]:
-            if tool.category == "DIRECTORY":
-                query_intent_keywords = ["전화", "연락처", "번호", "과사", "사무실", "교수님", "교수", "위치", "호실", "문의", "연구실"]
-                has_contact_intent = any(k in request.message.lower() for k in query_intent_keywords)
-                if not has_contact_intent:
-                    return
-            elif tool.category == "NOTICE":
-                notice_intent_keywords = ["공지", "소식", "모집", "안내문", "선발", "대회", "신청"]
-                has_notice_intent = any(k in request.message.lower() for k in notice_intent_keywords)
-                if not has_notice_intent:
-                    return
-
             yield (
                 AgentStreamEvent(
                     event_type="STATUS",
@@ -575,18 +549,51 @@ class AgentOrchestrator:
             )
 
             tool_data = None
-            tool_args = await AgentRouter.extract_tool_arguments(
-                tool=tool,
-                query=request.message,
-                history=request.history,
-                client_context=request.client_context,
-                academic_context=academic_context,
-            )
+            final_args = dict(tool_args or {})
 
-            bus_meta = tool_args.pop("_meta", None) if tool.category == "BUS" else None
+            # Middleware: Entity Resolution for DIRECTORY
+            if tool.category == "DIRECTORY":
+                curr_q = str(final_args.get("query") or "").strip()
+                if not curr_q or AgentRouter._is_generic_contact_term(curr_q):
+                    resolved_name = None
+                    if academic_context and isinstance(academic_context, dict):
+                        resolved_name = academic_context.get("advisor") or academic_context.get("advisorProfessorName") or academic_context.get("departmentName")
+                    if not resolved_name and request.client_context:
+                        acad_disp = request.client_context.get("academicDisplay")
+                        if isinstance(acad_disp, dict):
+                            resolved_name = acad_disp.get("advisorProfessorName") or acad_disp.get("profNm") or acad_disp.get("departmentName")
+                    if not resolved_name and request.history:
+                        name_pattern = re.compile(r"([가-힣]{2,4})\s*(?:교수님|교수|선생님)")
+                        for h in reversed(request.history[-6:]):
+                            content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else "")
+                            if content:
+                                m = name_pattern.findall(content)
+                                if m:
+                                    resolved_name = m[-1]
+                                    break
+                    if resolved_name:
+                        final_args["query"] = resolved_name
+                if final_args.get("query"):
+                    final_args["query"] = AgentRouter._clean_entity_query(str(final_args["query"]))
+
+            # Middleware: Bus stop & route matching
+            bus_meta = None
+            if tool.category == "BUS":
+                from app.orchestrator.router import DynamicBusMatcher
+                user_stop = str(final_args.get("bstopId") or final_args.get("stop_name") or "").strip()
+                bstop_id, stop_name, tab_name, valid_routes = await DynamicBusMatcher.resolve_stop_and_routes(
+                    request.message, user_stop if user_stop and not user_stop.isdigit() else None
+                )
+                if bstop_id:
+                    final_args["bstopId"] = bstop_id
+                bus_meta = {
+                    "validRoutes": valid_routes,
+                    "stopName": stop_name,
+                    "tabName": tab_name,
+                }
 
             try:
-                res = await tool.execute(tool_args, exec_context)
+                res = await tool.execute(final_args, exec_context)
                 if res is not None and not (isinstance(res, dict) and "error" in res):
                     if tool.category == "BUS" and bus_meta:
                         valid_routes = bus_meta.get("validRoutes", [])
@@ -680,7 +687,7 @@ class AgentOrchestrator:
                         summary_out = f"\n[내 맞춤 알림 및 브리프 종합 설정]:\n{json.dumps(res, ensure_ascii=False)}\n💡 지침: 등록된 키워드, 맞춤 알림, 데일리 브리프 설정을 일목요연하게 정리해 안내하세요.\n"
                     elif tool.category == "DIRECTORY":
                         tool_data = res
-                        q_param = str(tool_args.get("query") or "").strip()
+                        q_param = str(final_args.get("query") or "").strip()
                         if "college" in tool.name.lower() or "office" in tool.name.lower():
                             contacts = res if isinstance(res, list) else (res.get("items", []) if isinstance(res, dict) else [])
                             lines = [f"\n[교내 학과/단과대 사무실(과사) 연락처 조회 결과 (검색어: '{q_param}')]:"]

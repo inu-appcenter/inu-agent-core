@@ -133,5 +133,98 @@ class LLMClient:
                 raise e
 
 
+    async def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: str = "auto",
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute OpenAI / vLLM tool calling completion.
+        Returns dict with keys:
+            - "content": Optional text response / reasoning
+            - "thought": Optional reasoning thought
+            - "tool_calls": List[Dict] with id, function: {name, arguments: Dict}
+            - "raw_message": Full message dict from LLM
+        """
+        target_model = model or settings.LLM_MODEL_NAME
+        temp = temperature if temperature is not None else settings.LLM_TEMPERATURE
+        max_tok = max_tokens or settings.LLM_MAX_TOKENS
+
+        payload: Dict[str, Any] = {
+            "model": target_model,
+            "messages": messages,
+            "temperature": temp,
+            "max_tokens": max_tok,
+            "stream": False,
+        }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice
+
+        url = f"{self._base_url}/chat/completions"
+        headers = self._get_headers()
+
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            try:
+                response = await client.post(url, json=payload, headers=headers)
+                if response.status_code != 200:
+                    raise RuntimeError(f"LLM Server Error ({response.status_code}): {response.text[:200]}")
+
+                data = response.json()
+                choices = data.get("choices", [])
+                if not choices:
+                    return {"content": "", "thought": "", "tool_calls": [], "raw_message": {}}
+
+                msg = choices[0].get("message", {})
+                content = msg.get("content") or ""
+                reasoning_content = msg.get("reasoning_content") or ""
+
+                raw_tool_calls = msg.get("tool_calls") or []
+                parsed_tool_calls = []
+                for idx, tc in enumerate(raw_tool_calls):
+                    fn = tc.get("function", {})
+                    fn_name = fn.get("name", "")
+                    raw_args = fn.get("arguments", "{}")
+                    parsed_args = {}
+                    if isinstance(raw_args, dict):
+                        parsed_args = raw_args
+                    elif isinstance(raw_args, str):
+                        try:
+                            parsed_args = json.loads(raw_args)
+                        except Exception:
+                            parsed_args = {"query": raw_args}
+
+                    parsed_tool_calls.append({
+                        "id": tc.get("id") or f"call_{idx}_{abs(hash(fn_name)) % 10000}",
+                        "type": "function",
+                        "function": {
+                            "name": fn_name,
+                            "arguments": parsed_args,
+                        }
+                    })
+
+                thought = reasoning_content
+                if not thought and content and "<thought>" in content:
+                    import re
+                    m = re.search(r"<thought>(.*?)</thought>", content, re.DOTALL)
+                    if m:
+                        thought = m.group(1).strip()
+                        content = content.replace(m.group(0), "").strip()
+
+                return {
+                    "content": content,
+                    "thought": thought,
+                    "tool_calls": parsed_tool_calls,
+                    "raw_message": msg,
+                }
+            except Exception as e:
+                logger.error(f"Error during LLM tool completion: {e}", exc_info=True)
+                raise e
+
+
 # Global Singleton LLM Client
 llm_client = LLMClient()
