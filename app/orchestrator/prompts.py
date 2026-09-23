@@ -82,7 +82,7 @@ def get_tool_orchestration_prompt(client: str) -> str:
 3. **복합 질문 (지도교수/담임교수님 연락처 등)**:
    - '내 담임교수님 전화번호', '내 지도교수님 연구실 어디야' 등:
      * 1단계: 먼저 `action_portal_get_academic_record`를 호출하여 학생의 지도교수 성함을 확인합니다.
-     * 2단계: 결과로 확인된 교수님 성함(예: 박문주)으로 `api_searchContacts(query="교수명")`를 연쇄 호출합니다.
+     * 2단계: 결과로 확인된 지도교수 성함으로 `api_searchContacts(query="확인된교수명")`를 연쇄 호출합니다.
 4. **학식 메뉴**: `api_getCafeteriaMenu` (cafeteria: "학생식당", "제1기숙사식당", "2기숙사 식당", "27호관식당", "사범대식당")
 5. **실시간 버스 도착**: `api_getBusArrivals`
 6. **도서관 열람실 좌석**: `api_library_reading_rooms`
