@@ -148,8 +148,72 @@ class DynamicBusMatcher:
 class AgentRouter:
     """
     Uses LLM to dynamically inspect OpenAPI parameters schema, plan tools with real thoughts,
-    and execute autonomous ReAct chaining.
+    and execute autonomous ReAct chaining with full conversational context resolution.
     """
+    @staticmethod
+    def _format_history_str(history: Optional[List[Any]], max_turns: int = 6) -> str:
+        if not history:
+            return ""
+        h_lines = []
+        for h in history[-max_turns:]:
+            role = getattr(h, "role", None) or (h.get("role") if isinstance(h, dict) else "user")
+            content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else "")
+            if content:
+                clean_content = content.replace("\n", " ").strip()
+                if len(clean_content) > 200:
+                    clean_content = clean_content[:200] + "..."
+                h_lines.append(f"- {role}: {clean_content}")
+        return "\n[최근 대화 흐름]:\n" + "\n".join(h_lines) + "\n" if h_lines else ""
+
+    @staticmethod
+    def _build_messages_with_history(
+        system_msg: str,
+        history: Optional[List[Any]],
+        current_user_msg: str,
+        max_turns: int = 6,
+    ) -> List[Dict[str, str]]:
+        messages: List[Dict[str, str]] = [{"role": "system", "content": system_msg}]
+        if history:
+            for h in history[-max_turns:]:
+                role = getattr(h, "role", None) or (h.get("role") if isinstance(h, dict) else "user")
+                content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else "")
+                if content:
+                    clean_role = "assistant" if role == "assistant" else "user"
+                    clean_content = content.strip()
+                    if len(clean_content) > 350:
+                        clean_content = clean_content[:350] + "..."
+                    messages.append({"role": clean_role, "content": clean_content})
+        messages.append({"role": "user", "content": current_user_msg})
+        return messages
+
+    @staticmethod
+    def _is_generic_contact_term(term: Optional[str]) -> bool:
+        if not term or not term.strip():
+            return True
+        norm = re.sub(r"\s+", "", term).lower()
+        generic_terms = {
+            "전화번호", "이메일", "연락처", "번호", "연구실", "위치", "사무실", "과사",
+            "지도교수", "지도교수님", "담임교수", "담임교수님", "교수님", "교수", "선생님",
+            "전화번호나이메일", "이메일이나전화번호", "전화번호알려줘", "연락처알려줘", "번호알려줘",
+            "전화번호누구야", "번호누구야", "연락처누구야", "알려줘", "누구야", "어디야", "뭐야"
+        }
+        return norm in generic_terms
+
+    @staticmethod
+    def _clean_entity_query(query: Optional[str]) -> str:
+        if not query:
+            return ""
+        cleaned = query.strip()
+        pattern = re.compile(r"(?:교수님|교수|선생님|조교님|학부장님|학과장님|과사|연구실|사무실|연락처|전화번호|이메일|메일|번호)$")
+        changed = True
+        while changed and len(cleaned) >= 2:
+            m = pattern.search(cleaned)
+            if m and m.start() >= 2:
+                cleaned = cleaned[:m.start()].strip()
+            else:
+                changed = False
+        return cleaned
+
     @classmethod
     async def decide_initial_plan(
         cls,
@@ -163,14 +227,7 @@ class AgentRouter:
         """
         from datetime import datetime
         now = datetime.now()
-        history_str = ""
-        if history:
-            h_lines = []
-            for h in history[-4:]:
-                role = getattr(h, "role", "user")
-                content = getattr(h, "content", "")
-                h_lines.append(f"- {role}: {content}")
-            history_str = "\n[최근 대화 흐름]:\n" + "\n".join(h_lines) + "\n"
+        history_str = cls._format_history_str(history, max_turns=6)
 
         # Ensure core campus domain tools are always visible in candidate catalog
         core_categories = {"PORTAL", "LIBRARY", "LMS", "BUS", "CAFETERIA", "TIMETABLE", "SCHEDULE", "NOTICE", "DIRECTORY", "WEATHER", "CAMPUS_WATCH", "INU_AI_KNOWLEDGE"}
@@ -199,7 +256,7 @@ class AgentRouter:
                 "tools": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "실행할 도구 카테고리 목록 (예: ['PORTAL'], ['LIBRARY'], ['BUS'], ['CAFETERIA'], ['INU_AI_KNOWLEDGE'] 등)",
+                    "description": "실행할 도구 카테고리 목록 (예: ['PORTAL'], ['LIBRARY'], ['BUS'], ['CAFETERIA'], ['DIRECTORY'], ['INU_AI_KNOWLEDGE'] 등)",
                 },
             },
             "required": ["thought", "tools"],
@@ -209,27 +266,26 @@ class AgentRouter:
 현재 시점: {now.year}년 {now.month}월 {now.day}일
 
 [핵심 지침]:
-1. 사용자의 질문 의도를 명확히 파악하고 필요한 도구들을 선별하세요.
+1. [대화 맥락 연속성 및 생략된 주어/목적어 복원 (필수)]:
+   - 사용자의 현재 질문에 주어/목적어가 생략되었거나 대명사/후속 질의인 경우(예: 이전 대화에서 지도교수가 '박문주 교수님'으로 확인된 후 '전화번호 누구야?', '전화번호 알아?', '연구실 어디야?'라고 묻는 경우), **반드시 이전 대화 흐름의 핵심 엔티티(인물명, 교수명, 학과명, 식당명, 정류장 등)를 주어로 복원하여 사고(Thought)와 도구를 결정**하세요.
+   - ⚠️ 절대 "구체적인 대상이 명시되지 않았다"고 오판하여 사용자에게 반문하지 말고, 이전 대화의 대상(예: 박문주 교수님)을 찾아 해당 도구(DIRECTORY 등)를 선택하고 thought에 구체적인 대상을 명시하세요.
+   - 예 (지도교수 확인 후 전화번호 질의): thought: "이전 대화에서 확인된 박문주 교수님의 전화번호를 교내 전화번호부에서 조회합니다.", tools: ["DIRECTORY"]
 2. [개인 학적 및 성적 질의]:
-   '내 학적 정보', '내 학번/학과', '내 성적', '취득학점' 등 개인 학적/성적 관련 질문은 반드시 'PORTAL' 도구를 선택하세요.
+   '내 학적 정보', '내 학번/학과', '내 성적', '취득학점', '내 지도교수' 등 개인 학적/성적 관련 질문은 반드시 'PORTAL' 도구를 선택하세요.
 3. [1인칭 졸업/학사 판정 질의]:
    '나 졸업 가능해?', '나 졸업 요건 돼?', '내 취득학점'처럼 1인칭으로 본인의 졸업/학점을 묻는 질문은,
    학생 본인의 학적(소속 학과, 학번, 취득 학점) 확인이 필수적이므로 먼저 'PORTAL'을 반드시 포함하세요.
-4. [일반 학과 규정/학칙 질의]:
+4. [교내 연락처/위치 질의]:
+   교수님, 학과 사무실, 교내 행정부서의 전화번호나 위치/호실을 묻는 질문은 'DIRECTORY' 도구를 선택하세요.
+5. [일반 학과 규정/학칙 질의]:
    '컴퓨터공학과 졸업 요건 알려줘'처럼 3인칭 또는 일반 학과 규정을 묻는 질문은 개인 학적 조회가 불필요하므로 'INU_AI_KNOWLEDGE'만 선택하세요.
-5. [도서관 열람실 잔여 좌석 및 스터디룸 현황 질의]:
+6. [도서관 열람실 잔여 좌석 및 스터디룸 현황 질의]:
    '열람실 잔여 좌석', '도서관 좌석 현황', '열람실 몇 자리 남았어?', '스터디룸 목록', '스터디룸 예약 가능한 곳' 등 학산도서관의 현재 잔여 좌석이나 스터디룸 관련 질문은 반드시 'LIBRARY' 도구를 선택하세요. (빈자리 푸시 알림/감시 예약 요청이 아닌 단순 현황 질문은 절대 CAMPUS_WATCH가 아닌 LIBRARY를 선택해야 합니다.)
-6. [도서관 빈자리 알림/스나이퍼 질의]:
+7. [도서관 빈자리 알림/스나이퍼 질의]:
    '자리 나면 알려줘', '알림 걸어줘', '취소표 나오면 알려줘', '빈자리 감시'처럼 빈자리 발생 시 푸시 알림/예약을 요구하는 질문은 단순 잔여 좌석 조회가 아니므로 반드시 'CAMPUS_WATCH' 도구를 선택하세요.
-7. [판단 이유 (thought) 작성 및 정직성 규칙]:
+8. [판단 이유 (thought) 작성 및 정직성 규칙]:
    - 반드시 실제 선택한 'tools' 목록에 부합하는 판단 이유만 작성해야 합니다.
-   - 예: 'PORTAL' 도구를 선택하지 않았으면서 "학우님의 학적/학점 정보와 대조하고 있습니다" 같은 가짜 행동(Hallucination)을 작성하는 것은 절대 금지됩니다!
-   - 질문에 등장한 대상(예: 정문 버스, 공학관 학식, 컴퓨터공학부 졸업 요건 등)을 직접 언급하며 실제 실행할 도구의 목적을 솔직하게 작성하세요.
-   - 예 (도서관 좌석 질의): '학산도서관 열람실의 실시간 잔여 좌석 현황을 확인하고 있습니다.'
-   - 예 (학칙 질의): '컴퓨터공학부의 공식 학칙 및 졸업 요건 규정을 지식베이스에서 확인하고 있습니다.'
-   - 예 (버스 질의): '인천대 정문 정류소의 실시간 시내버스 도착 정보를 확인하고 있습니다.'
-   - 예 (학식 질의): '오늘의 교내 학생식당 메뉴와 운영 현황을 조회하고 있습니다.'
-   - 예 (빈자리 알림/스나이퍼): '학산도서관 실시간 빈자리 감시(스나이퍼) 및 푸시 알림 예약을 진행하고 있습니다.'
+   - 질문에 등장했거나 대화 맥락에서 복원된 구체적인 대상(예: 박문주 교수님 전화번호, 정문 버스, 공학관 학식 등)을 직접 언급하며 실제 실행할 도구의 목적을 명확히 작성하세요.
 
 {history_str}
 [사용 가능한 도구 목록]:
@@ -237,10 +293,7 @@ class AgentRouter:
 
 반드시 JSON 스키마 규격에 맞춰 응답하세요."""
 
-        messages = [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": query},
-        ]
+        messages = cls._build_messages_with_history(system_msg, history, query, max_turns=6)
 
         try:
             raw_json = await llm_client.create_guided_completion(
@@ -270,11 +323,13 @@ class AgentRouter:
     ) -> Dict[str, Any]:
         """
         ReAct Autonomous Chaining:
-        Examines current tool observations to decide if sufficient to answer.
+        Examines current tool observations and conversation history to decide if sufficient to answer.
         If insufficient, selects next-hop tools and generates reasoning thought.
         """
         if not current_observation or not current_observation.strip():
             return {"thought": "", "tools": []}
+
+        history_str = cls._format_history_str(history, max_turns=4)
 
         tool_catalog = []
         for t in available_tools:
@@ -304,7 +359,7 @@ class AgentRouter:
 
         system_msg = f"""당신은 인천대학교 캠퍼스 AI 비서의 ReAct 자율 의사결정 엔진입니다.
 [사용자 질문]: "{query}"
-
+{history_str}
 [현재까지 수집된 도구 실행 결과 (Observation)]:
 {current_observation}
 
@@ -325,10 +380,12 @@ class AgentRouter:
 
 반드시 JSON 스키마 규격에 맞춰 응답하세요."""
 
-        messages = [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": "현재까지의 관찰 결과를 바탕으로 후속 조치를 결정하세요."},
-        ]
+        messages = cls._build_messages_with_history(
+            system_msg,
+            history,
+            "현재까지의 관찰 결과를 바탕으로 후속 조치를 결정하세요.",
+            max_turns=4,
+        )
 
         try:
             raw_json = await llm_client.create_guided_completion(
@@ -350,9 +407,11 @@ class AgentRouter:
         tool: BaseTool,
         query: str,
         history: Optional[List[Any]] = None,
+        client_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Dynamically extracts tool arguments matching the tool's OpenAPI schema using LLM reasoning.
+        Dynamically extracts tool arguments matching the tool's OpenAPI schema using LLM reasoning,
+        full conversation context, and automatic entity fallback resolution.
         """
         schema = tool.get_schema()
         fn = schema.get("function", {})
@@ -379,8 +438,9 @@ class AgentRouter:
         # For other schema-driven tools, ask LLM to extract arguments conforming to the OpenAPI parameters schema
         from datetime import datetime
         now = datetime.now()
+        history_str = cls._format_history_str(history, max_turns=6)
 
-        system_msg = f"""당신은 사용자의 질의로부터 OpenAPI REST API 호출에 필요한 JSON 인자(Arguments)를 정확히 추출하는 AI 파라미터 리졸버입니다.
+        system_msg = f"""당신은 사용자의 질의와 최근 대화 맥락으로부터 OpenAPI REST API 호출에 필요한 JSON 인자(Arguments)를 정확히 추출하는 AI 파라미터 리졸버입니다.
 
 [도구 이름]: {fn.get('name')}
 [도구 설명]: {fn.get('description')}
@@ -388,12 +448,13 @@ class AgentRouter:
 {json.dumps(params_schema, ensure_ascii=False, indent=2)}
 
 [현재 기준 일시]: {now.year}년 {now.month}월 {now.day}일
-
+{history_str}
 규칙:
-1. 사용자 질의에서 언급된 핵심 엔티티와 조건을 파악하여 파라미터 값을 추출하세요.
+1. **[대화 맥락 및 생략된 엔티티 복원 (핵심)]**:
+   - 사용자의 현재 질문에 주어/대상/파라미터가 생략된 경우(예: '전화번호 알아?', '전화번호 누구야?', '연구실 위치는?', '이메일 뭐야?', '언제까지야?'), 반드시 위 **[최근 대화 흐름]**에서 언급된 주된 대상(인물명, 교수명 예: '박문주', 학과명, 식당명 등)을 검색어(`query`)나 해당 파라미터 값으로 추출하세요.
 2. 학과명, 단과대, 교수명, 부서명 등의 검색어(query) 파라미터 추출 시:
-   - '과사', '사무실', '전화번호', '알려줘', '위치', '번호', '연락처' 같은 질의 수식어는 제거하세요.
-   - 축약어/줄임말(예: '컴공' -> '컴퓨터공학', '임베' -> '임베디드', '정통' -> '정보통신', '전전' -> '전자공학', '산경' -> '산업경영', '패디' -> '패션산업', '미컴' -> '미디어커뮤니케이션', '사복' -> '사회복지', '생공' -> '생명공학' 등)은 대학 포털 DB에서 검색될 수 있는 정규 학과/부서 키워드로 정규화하세요.
+   - '과사', '사무실', '전화번호', '알려줘', '위치', '번호', '연락처', '알아?', '누구야' 같은 질의 수식어는 제거하고 실제 고유명사(예: '박문주', '컴퓨터공학부')만 추출하세요.
+   - 축약어/줄임말(예: '컴공' -> '컴퓨터공학', '임베' -> '임베디드', '정통' -> '정보통신', '전전' -> '전자공학과', '산경' -> '산업경영', '패디' -> '패션산업', '미컴' -> '미디어커뮤니케이션', '사복' -> '사회복지', '생공' -> '생명공학' 등)은 대학 포털 DB에서 검색될 수 있는 정규 학과/부서 키워드로 정규화하세요.
 3. 식당(cafeteria) 파라미터는 학생식당, 제1기숙사식당, 2기숙사 식당, 27호관식당, 사범대식당 중 가장 일치하는 명칭으로 추출하세요.
 4. 도서관(library) 도구 파라미터 추출 시:
    - 좌석 예약/배정 요청(예: '30번 자리 예약해줘', '자리 잡아줘', '제1열람실 배정해줘', '열람실 예약'): target="RESERVE_SEAT", room_name과 seat_no(언급된 경우)를 추출하세요.
@@ -408,14 +469,12 @@ class AgentRouter:
    - 사용자가 '이번 달', '오늘', '학사일정' 등을 언급하거나 연도/월을 생략한 경우 현재 연도({now.year})와 현재 월({now.month})을 정수(integer)로 추출하세요.
 7. 공지사항(notice) 검색어(query) 추출 시:
    - 사용자가 '장학 공지', '학사 공지' 등을 물은 경우 검색어(query)에 '장학', '학사' 등 핵심 키워드를 추출하세요.
-8. 질의에 명시되지 않은 선택적 파라미터는 기본값(default)을 사용하거나 생략하세요.
+8. 질의에 명시되지 않고 대화 맥락에도 없는 선택적 파라미터는 기본값(default)을 사용하거나 생략하세요.
 9. 반드시 오직 유효한 JSON 객체({{ ... }})만 반환하세요.
 """
-        messages = [
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": query},
-        ]
+        messages = cls._build_messages_with_history(system_msg, history, query, max_turns=6)
 
+        extracted_args: Dict[str, Any] = {}
         try:
             raw_json = await llm_client.create_guided_completion(
                 messages=messages,
@@ -424,8 +483,59 @@ class AgentRouter:
             )
             parsed = json.loads(raw_json)
             if isinstance(parsed, dict):
-                return parsed
+                extracted_args = parsed
         except Exception as e:
             logger.warning(f"LLM parameter extraction failed for {tool.name}: {e}")
 
-        return {}
+        # Post-Processing: Entity Context Fallback & Normalization for search queries
+        if "query" in properties:
+            curr_query = str(extracted_args.get("query") or "").strip()
+            is_generic = cls._is_generic_contact_term(curr_query)
+
+            if not curr_query or is_generic:
+                # 1. Fallback from history (Search for professor names / department names in recent turns)
+                resolved_name = None
+                if history:
+                    name_pattern = re.compile(r"([가-힣]{2,4})\s*(?:교수님|교수|선생님)")
+                    dept_pattern = re.compile(r"([가-힣]+(?:학부|학과|과))")
+                    non_names = {"지도", "담임", "전담", "학과", "학부", "담당", "우리", "해당", "어떤", "무슨", "소속", "모든"}
+
+                    for h in reversed(history[-6:]):
+                        content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else "")
+                        if content:
+                            matches = name_pattern.findall(content)
+                            for m in reversed(matches):
+                                if m not in non_names:
+                                    resolved_name = m
+                                    break
+                            if resolved_name:
+                                break
+                            dept_matches = dept_pattern.findall(content)
+                            if dept_matches:
+                                resolved_name = dept_matches[-1]
+                                break
+
+                # 2. Fallback from client_context (Academic advisor / department)
+                if not resolved_name and client_context:
+                    acad_disp = client_context.get("academicDisplay")
+                    if isinstance(acad_disp, dict):
+                        resolved_name = acad_disp.get("advisorProfessorName") or acad_disp.get("departmentName")
+                    if not resolved_name:
+                        acad = client_context.get("academic")
+                        if isinstance(acad, dict):
+                            resolved_name = acad.get("advisorProfessorName") or acad.get("departmentName")
+
+                if resolved_name:
+                    logger.info(f"Resolved empty query fallback to '{resolved_name}' from conversation/client context")
+                    extracted_args["query"] = resolved_name
+                elif is_generic:
+                    extracted_args["query"] = ""
+
+            # Clean query suffixes
+            if extracted_args.get("query"):
+                cleaned = cls._clean_entity_query(str(extracted_args["query"]))
+                if len(cleaned) >= 2:
+                    extracted_args["query"] = cleaned
+
+        return extracted_args
+

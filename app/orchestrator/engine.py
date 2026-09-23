@@ -552,6 +552,7 @@ class AgentOrchestrator:
                 tool=tool,
                 query=request.message,
                 history=request.history,
+                client_context=request.client_context,
             )
 
             bus_meta = tool_args.pop("_meta", None) if tool.category == "BUS" else None

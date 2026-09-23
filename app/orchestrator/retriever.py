@@ -114,22 +114,26 @@ class SemanticToolRetriever:
 
     def _build_augmented_query(self, query: str, history: Optional[List[Any]] = None) -> str:
         """
-        Synthesize current query with recent user turns for multi-turn context inheritance.
-        e.g., '20학번은?', '연락처는?' will inherit previous turn context.
+        Synthesize current query with recent user and assistant turns for multi-turn context inheritance.
+        e.g., '20학번은?', '전화번호 알아?' will inherit previous turn context including assistant-discovered entities.
         """
         q = query.strip()
         if not history:
             return q
 
-        user_prev = []
+        prev_turns = []
         for h in history[-4:]:
             role = getattr(h, "role", None) or (h.get("role") if isinstance(h, dict) else None)
             content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else "")
-            if role == "user" and content:
-                user_prev.append(content.strip())
+            if content:
+                # Clean and limit assistant message length to preserve entities without vector noise
+                clean_content = content.replace("\n", " ").strip()
+                if role == "assistant" and len(clean_content) > 250:
+                    clean_content = clean_content[:250]
+                prev_turns.append(clean_content)
 
-        if user_prev:
-            return f"{' '.join(user_prev)} {q}"
+        if prev_turns:
+            return f"{' '.join(prev_turns)} {q}"
         return q
 
     async def retrieve(
