@@ -8,6 +8,11 @@ import json
 import re
 
 from app.core.logging import logger
+from app.core.anonymizer import (
+    sanitize_text,
+    sanitize_academic_record,
+    build_anonymized_academic_summary,
+)
 from app.llm.client import llm_client
 from app.llm.schemas import ChatRequest, AgentStreamEvent
 from app.orchestrator.prompts import (
@@ -277,8 +282,9 @@ class AgentOrchestrator:
                 thinking="인천대학교 공식 학칙 및 졸업 규정 지식베이스의 정확한 내용을 전달합니다.",
             )
 
-            # Build enriched question with anonymized academic context
-            inu_question = request.message
+            # Build enriched question with anonymized academic context (Strict Zero-PII)
+            clean_message = sanitize_text(request.message)
+            inu_question = clean_message
             if academic_data_dict:
                 ac_parts = []
                 if academic_data_dict.get("entryYear"):
@@ -293,7 +299,7 @@ class AgentOrchestrator:
                     ac_parts.append(f"평점평균={academic_data_dict['gradeAverage']}")
 
                 if ac_parts:
-                    inu_question = f"{request.message}\n\n[비식별 학적 참고정보: {', '.join(ac_parts)}]"
+                    inu_question = f"{clean_message}\n\n[비식별 학적 참고정보: {', '.join(ac_parts)}]"
 
             # Find inuchat tool
             inuchat_tool = None
@@ -415,46 +421,10 @@ class AgentOrchestrator:
                     display_data = client_ctx.get("academicDisplay")
                     merged_portal = {**domain_data, **(display_data if isinstance(display_data, dict) else {})}
 
-                    dept = merged_portal.get("departmentName") or merged_portal.get("deptName") or ""
-                    colg = merged_portal.get("collegeName") or ""
-                    status = merged_portal.get("enrollmentStatus") or ""
-                    change = merged_portal.get("latestEnrollmentChange") or ""
-                    sem = merged_portal.get("completedSemesterCount") or ""
-                    credits = merged_portal.get("acquiredCredits") or ""
-                    gpa = merged_portal.get("gradeAverage") or ""
-                    entry = merged_portal.get("entryYear") or (merged_portal.get("studentId", "")[:4] if merged_portal.get("studentId") else "")
-                    name = merged_portal.get("koreanName") or "학우"
-                    advisor = merged_portal.get("advisorProfessorName") or merged_portal.get("profNm") or ""
-
-                    status_display = status
-                    if change and change != status:
-                        status_display = f"{status} ({change})"
-
-                    ac_data_out = {
-                        "name": name,
-                        "departmentName": dept,
-                        "collegeName": colg,
-                        "enrollmentStatus": status_display,
-                        "completedSemesterCount": sem,
-                        "acquiredCredits": credits,
-                        "gradeAverage": gpa,
-                        "entryYear": entry,
-                        "advisor": advisor,
-                    }
-
-                    advisor_hint = ""
-                    if advisor:
-                        advisor_hint = f"- 지도교수: {advisor} 교수님 (연락처/전화번호 조회가 필요한 경우 `api_searchContacts(query='{advisor}')` 도구를 호출하세요.)\n"
-
-                    summary_out = (
-                        f"\n[포털 종합정보(ERP) 학생 실제 학적 연동 데이터]:\n"
-                        f"- 성명/소속: {name}님 ({colg} {dept})\n"
-                        f"- 학적 상태: {status_display}" + (f" (이수 학기: {sem})" if sem else "") + "\n"
-                        f"- 취득 학점: {credits}학점 (평점 평균: {gpa})\n"
-                        f"- 입학 정보: {entry}학번\n"
-                        + advisor_hint
-                        + f"- [응답 지침]: 위 연동된 실제 학적 데이터를 바탕으로 학생의 질문에 정확히 답변하세요. 교수님 연락처가 필요하면 `api_searchContacts`를 연쇄 호출하세요.\n"
-                    )
+                    # 100% Zero-PII: Sanitize record (no names, no full student IDs, no personal phone numbers)
+                    clean_academic = sanitize_academic_record(merged_portal)
+                    ac_data_out = clean_academic
+                    summary_out = build_anonymized_academic_summary(clean_academic)
                 elif tool.category == "LMS" and isinstance(domain_data, (dict, list)):
                     events = []
                     courses = []
@@ -861,7 +831,8 @@ class AgentOrchestrator:
                 None,
             )
 
-            inu_q = request.message
+            clean_msg = sanitize_text(request.message)
+            inu_q = clean_msg
             if academic_context:
                 ac_parts = []
                 if academic_context.get("entryYear"):
@@ -875,7 +846,7 @@ class AgentOrchestrator:
                 if academic_context.get("gradeAverage"):
                     ac_parts.append(f"평점평균={academic_context['gradeAverage']}")
                 if ac_parts:
-                    inu_q = f"{request.message}\n\n[비식별 학적 참고정보: {', '.join(ac_parts)}]"
+                    inu_q = f"{clean_msg}\n\n[비식별 학적 참고정보: {', '.join(ac_parts)}]"
 
             status_state = "completed"
             status_title = f"{tool_display_name} 검색 완료"
