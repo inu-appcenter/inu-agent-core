@@ -22,17 +22,20 @@ class InuAiKnowledgeTool(BaseTool):
 
     def get_schema(self) -> Dict[str, Any]:
         return {
-            "name": self.name,
-            "description": self.description,
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "question": {
-                        "type": "string",
-                        "description": "인천대학교 학칙, 졸업요건, 규정, 공지사항 관련 질문 내용",
-                    }
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "인천대학교 학칙, 졸업요건, 규정, 공지사항 관련 질문 내용",
+                        }
+                    },
+                    "required": ["question"],
                 },
-                "required": ["question"],
             },
         }
 
