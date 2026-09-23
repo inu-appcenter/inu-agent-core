@@ -627,9 +627,21 @@ class AgentOrchestrator:
                     "tabName": tab_name,
                 }
 
+            status_state = "completed"
+            status_title = f"{tool_display_name} 확인 완료"
+
             try:
                 res = await tool.execute(final_args, exec_context)
-                if res is not None and not (isinstance(res, dict) and "error" in res):
+                if isinstance(res, dict) and "error" in res:
+                    err_msg = res.get("error", "알 수 없는 통신 오류")
+                    status_state = "failed"
+                    status_title = f"{tool_display_name} 조회 실패"
+                    summary_out = (
+                        f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 서버 응답 지연 또는 오류({err_msg})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
+                        f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보(식단 메뉴, 버스 도착 시간, 전화번호, 시간표 등)를 지어내지 말고, "
+                        f"'현재 교내 시스템 일시 오류로 실시간 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
+                    )
+                elif res is not None:
                     if tool.category == "BUS" and bus_meta:
                         valid_routes = bus_meta.get("validRoutes", [])
                         stop_name = bus_meta.get("stopName", "정류소")
@@ -646,11 +658,48 @@ class AgentOrchestrator:
                             "stopName": stop_name,
                             "tabName": tab_name,
                         }
-                        summary_out = (
-                            f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n"
-                            f"- 모니터링 노선: {', '.join(valid_routes)}\n"
-                            f"- 실시간 도착 정보:\n{json.dumps(filtered_arrivals, ensure_ascii=False)}\n"
-                        )
+                        if filtered_arrivals:
+                            summary_out = (
+                                f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n"
+                                f"- 모니터링 노선: {', '.join(valid_routes)}\n"
+                                f"- 실시간 도착 정보:\n{json.dumps(filtered_arrivals, ensure_ascii=False)}\n"
+                            )
+                        else:
+                            summary_out = (
+                                f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n"
+                                f"- 모니터링 노선: {', '.join(valid_routes)}\n"
+                                f"- 현재 해당 정류장에 운행 대기 중이거나 도착 예정인 인팁 서비스 버스가 없습니다.\n"
+                                f"💡 지침: 학생에게 현재 운행 중이거나 도착 예정인 버스가 없음을 사실대로 안내하세요. 절대로 임의의 도착 시간을 지어내지 마세요.\n"
+                            )
+                    elif tool.category == "CAFETERIA":
+                        tool_data = res
+                        caf_name = final_args.get("cafeteria", "학생식당")
+                        raw_menus = []
+                        if isinstance(res, list):
+                            raw_menus = res
+                        elif isinstance(res, dict):
+                            raw_menus = res.get("items") or res.get("menus") or res.get("cafeterias") or []
+
+                        valid_menus = [
+                            m for m in raw_menus
+                            if isinstance(m, dict) and (m.get("menu") or m.get("menuName")) and m.get("menu") != "-" and m.get("menuName") != "-"
+                        ]
+                        if valid_menus:
+                            lines = [f"\n[CAFETERIA {caf_name} 식단 메뉴 조회 결과]:"]
+                            for m in valid_menus:
+                                corner = m.get("name") or m.get("cornerName") or m.get("corner") or "코너"
+                                menu_str = m.get("menu") or m.get("menuName") or ""
+                                meal_label = m.get("mealLabel") or m.get("mealType") or ""
+                                prefix = f"[{meal_label}] " if meal_label else ""
+                                lines.append(f"- {prefix}{corner}: {menu_str}")
+                            lines.append("⚠️ 핵심 지침: 반드시 위 실제 조회된 메뉴 목록에 근거하여 안내하세요. 위 목록에 없는 가상의 메뉴(제육볶음, 돈까스 등)를 절대로 추가하거나 지어내지 마세요.")
+                            summary_out = "\n".join(lines) + "\n"
+                        else:
+                            summary_out = (
+                                f"\n[CAFETERIA {caf_name} 식단 메뉴 조회 결과]:\n"
+                                f"- 현재 {caf_name}에 등록된 식단 메뉴가 없습니다 (식당 운영 시간 외 또는 식단 미등록 상태).\n"
+                                f"⚠️ 핵심 지침: 절대로 가상의 식단 메뉴를 지어내어 답변하지 마세요. 학생에게 '현재 {caf_name}의 식단 정보가 등록되어 있지 않거나 식당 미운영 상태입니다'라고 사실대로 안내하세요.\n"
+                            )
                     elif tool.category == "LIBRARY" and isinstance(res, dict):
                         tool_data = res
                         mode = res.get("mode")
@@ -766,6 +815,12 @@ class AgentOrchestrator:
                         summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
             except Exception as ex:
                 logger.warning(f"Error executing tool {tool.name}: {ex}")
+                status_state = "failed"
+                status_title = f"{tool_display_name} 일시 조회 지연"
+                summary_out = (
+                    f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 통신 오류({str(ex)})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
+                    f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보를 지어내지 말고, '현재 교내 시스템 일시 오류로 실시간 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
+                )
 
             if tool.category not in emitted_cards and tool_data:
                 card = CardSynthesizer.synthesize_for_domain(
@@ -782,9 +837,9 @@ class AgentOrchestrator:
                 AgentStreamEvent(
                     event_type="STATUS",
                     status_id=tool_id,
-                    status_title=f"{tool_display_name} 확인 완료",
+                    status_title=status_title,
                     status_category=tool.category,
-                    status_state="completed",
+                    status_state=status_state,
                 ),
                 summary_out,
                 None,
@@ -822,6 +877,9 @@ class AgentOrchestrator:
                 if ac_parts:
                     inu_q = f"{request.message}\n\n[비식별 학적 참고정보: {', '.join(ac_parts)}]"
 
+            status_state = "completed"
+            status_title = f"{tool_display_name} 검색 완료"
+
             try:
                 res = await tool.execute({"question": inu_q}, exec_context)
                 if isinstance(res, dict) and res.get("success") and res.get("data"):
@@ -840,16 +898,29 @@ class AgentOrchestrator:
                         if card:
                             yield (AgentStreamEvent(event_type="CARD", card=card), "", None, None)
                             emitted_cards.add("INU_AI_KNOWLEDGE")
+                else:
+                    status_state = "failed"
+                    status_title = f"{tool_display_name} 검색 결과 없음"
+                    summary_out = (
+                        f"\n[시스템 학칙 지식베이스 검색 결과 없음]: 관련 학칙/규정 정보를 찾지 못했습니다.\n"
+                        f"⚠️ 핵심 지침: 가상의 학칙 규정을 지어내지 말고, 지식베이스에서 해당 내용을 찾지 못했음을 사실대로 안내하세요.\n"
+                    )
             except Exception as ex:
                 logger.warning(f"Error executing INUChat tool {tool.name}: {ex}")
+                status_state = "failed"
+                status_title = f"{tool_display_name} 검색 일시 지연"
+                summary_out = (
+                    f"\n[시스템 오류 고지]: 학칙/규정 지식베이스 검색 중 일시적인 오류({str(ex)})가 발생했습니다.\n"
+                    f"⚠️ 핵심 지침: 가상의 학칙 조항을 지어내지 말고, 일시적인 지식베이스 통신 지연 사실을 안내하세요.\n"
+                )
 
             yield (
                 AgentStreamEvent(
                     event_type="STATUS",
                     status_id=tool_id,
-                    status_title=f"{tool_display_name} 검색 완료",
+                    status_title=status_title,
                     status_category="INU_AI_KNOWLEDGE",
-                    status_state="completed",
+                    status_state=status_state,
                 ),
                 summary_out,
                 None,

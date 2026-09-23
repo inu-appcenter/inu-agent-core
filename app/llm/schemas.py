@@ -152,5 +152,5 @@ class AgentStreamEvent(BaseModel):
     status_id: Optional[str] = None
     status_title: Optional[str] = None
     status_category: Optional[str] = None
-    status_state: Optional[Literal["running", "completed"]] = None
+    status_state: Optional[Literal["running", "completed", "failed"]] = None
     thinking: Optional[str] = None

@@ -31,7 +31,15 @@ class ToolRegistry:
         logger.info(f"Registered tool: {tool.name} (Category: {tool.category})")
 
     def get_tool(self, name: str) -> Optional[BaseTool]:
-        return self._tools.get(name)
+        if name in self._tools:
+            return self._tools[name]
+        # Case-insensitive and prefix-tolerant alias matching
+        clean_name = name.replace("api_", "").replace("action_", "").replace("-", "_").lower()
+        for t_name, t in self._tools.items():
+            t_clean = t_name.replace("api_", "").replace("action_", "").replace("-", "_").lower()
+            if t_clean == clean_name:
+                return t
+        return None
 
     def get_tools_by_category(self, category: str) -> List[BaseTool]:
         cat_upper = category.upper()
