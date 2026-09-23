@@ -181,8 +181,34 @@ class CardSynthesizer:
             return None
         items: List[ListItem] = []
 
+        raw_list = []
         if isinstance(data, list):
-            for m in data[:5]:
+            raw_list = data
+        elif isinstance(data, dict):
+            raw_list = data.get("data") or data.get("cafeterias") or data.get("menus") or data.get("items") or []
+            if isinstance(raw_list, dict):
+                raw_list = [raw_list]
+
+        # Case A: List of strings [조식, 중식, 석식]
+        if isinstance(raw_list, list) and raw_list and isinstance(raw_list[0], str):
+            meal_names = ["조식", "중식", "석식"]
+            for idx, menu_text in enumerate(raw_list):
+                clean = str(menu_text).strip()
+                if clean and clean != "-" and clean != "운영없음" and clean != "식단 없음":
+                    label = meal_names[idx] if idx < len(meal_names) else f"식단 {idx+1}"
+                    menu_lines = [l.strip() for l in clean.split("\n") if l.strip() and not l.strip().startswith("*")]
+                    preview = " | ".join(menu_lines[:4])
+                    items.append(
+                        ListItem(
+                            title=f"{label} 식단",
+                            subtitle=preview,
+                            tag=label,
+                            link="/home/menu",
+                        )
+                    )
+        # Case B: List of dicts
+        elif isinstance(raw_list, list):
+            for m in raw_list[:5]:
                 if isinstance(m, dict):
                     corner = m.get("name") or m.get("cornerName") or m.get("restaurant") or "식당"
                     menu_text = m.get("menu") or m.get("menuName") or ""
@@ -192,22 +218,6 @@ class CardSynthesizer:
                                 title=str(corner),
                                 subtitle=str(menu_text).replace("\n", " | "),
                                 tag=m.get("mealLabel", "식단"),
-                                link="/home/menu",
-                            )
-                        )
-        elif isinstance(data, dict):
-            caf_list = data.get("cafeterias") or data.get("menus") or []
-            target_meal = data.get("targetMeal") or data.get("mealLabel") or "메뉴"
-            for m in caf_list[:5]:
-                if isinstance(m, dict):
-                    name = m.get("name") or m.get("corner") or "식당"
-                    menu = m.get("menu") or m.get("name") or ""
-                    if menu and menu != "-":
-                        items.append(
-                            ListItem(
-                                title=str(name),
-                                subtitle=str(menu).replace("\n", " | "),
-                                tag=target_meal,
                                 link="/home/menu",
                             )
                         )

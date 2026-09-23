@@ -648,21 +648,39 @@ class AgentOrchestrator:
                         if isinstance(res, list):
                             raw_menus = res
                         elif isinstance(res, dict):
-                            raw_menus = res.get("items") or res.get("menus") or res.get("cafeterias") or []
+                            raw_menus = res.get("data") or res.get("items") or res.get("menus") or res.get("cafeterias") or []
+                            if isinstance(raw_menus, dict):
+                                raw_menus = [raw_menus]
 
-                        valid_menus = [
-                            m for m in raw_menus
-                            if isinstance(m, dict) and (m.get("menu") or m.get("menuName")) and m.get("menu") != "-" and m.get("menuName") != "-"
-                        ]
-                        if valid_menus:
-                            lines = [f"\n[CAFETERIA {caf_name} 식단 메뉴 조회 결과]:"]
-                            for m in valid_menus:
-                                corner = m.get("name") or m.get("cornerName") or m.get("corner") or "코너"
-                                menu_str = m.get("menu") or m.get("menuName") or ""
-                                meal_label = m.get("mealLabel") or m.get("mealType") or ""
-                                prefix = f"[{meal_label}] " if meal_label else ""
-                                lines.append(f"- {prefix}{corner}: {menu_str}")
-                            lines.append("⚠️ 핵심 지침: 반드시 위 실제 조회된 메뉴 목록에 근거하여 안내하세요. 위 목록에 없는 가상의 메뉴(제육볶음, 돈까스 등)를 절대로 추가하거나 지어내지 마세요.")
+                        lines = [f"\n[CAFETERIA {caf_name} 식단 메뉴 조회 결과]:"]
+                        has_valid_menu = False
+
+                        # Case 1: List of strings [조식, 중식, 석식] (Spring Boot INU Portal standard format)
+                        if isinstance(raw_menus, list) and raw_menus and isinstance(raw_menus[0], str):
+                            meal_names = ["조식(아침)", "중식(점심)", "석식(저녁)"]
+                            for idx, menu_text in enumerate(raw_menus):
+                                label = meal_names[idx] if idx < len(meal_names) else f"식단 {idx+1}"
+                                clean_text = str(menu_text).strip()
+                                if clean_text and clean_text != "-" and clean_text != "운영없음" and clean_text != "식단 없음":
+                                    has_valid_menu = True
+                                    lines.append(f"### [{label}]\n{clean_text}\n")
+                                else:
+                                    lines.append(f"- {label}: 운영 없음 또는 식단 미등록")
+
+                        # Case 2: List of dicts
+                        elif isinstance(raw_menus, list):
+                            for m in raw_menus:
+                                if isinstance(m, dict):
+                                    corner = m.get("name") or m.get("cornerName") or m.get("corner") or "코너"
+                                    menu_str = m.get("menu") or m.get("menuName") or ""
+                                    meal_label = m.get("mealLabel") or m.get("mealType") or ""
+                                    if menu_str and menu_str != "-":
+                                        has_valid_menu = True
+                                        prefix = f"[{meal_label}] " if meal_label else ""
+                                        lines.append(f"- {prefix}{corner}: {menu_str}")
+
+                        if has_valid_menu:
+                            lines.append("\n⚠️ 핵심 지침: 반드시 위 실제 조회된 메뉴 목록에 근거하여 안내하세요. 위 목록에 없는 가상의 메뉴를 절대로 추가하거나 지어내지 마세요.")
                             summary_out = "\n".join(lines) + "\n"
                         else:
                             summary_out = (
