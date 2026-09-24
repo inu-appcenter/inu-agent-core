@@ -135,20 +135,64 @@ DEFAULT_ACTION_RULES: Dict[str, ActionRule] = {
         domain="PORTAL",
         protocol="NEXACRO_SSV",
         title="학생별 수강 시간표 조회",
-        description="포털 종합정보시스템(ERP)에서 수강 신청 교과목, 강의실, 강의 시간표 목록을 조회합니다.",
+        description="포털 종합정보시스템(ERP 개인학적조회 수강탭)에서 수강 신청 교과목, 강의실, 강의 시간표 목록을 조회합니다.",
+        version="2.0.0",
+        target=RuleTarget(
+            url="/uni/sreg/TsimCtr/findTlsnAplyDetaCtntList.do",
+            method="POST",
+            params={"menuId": "M002043", "pgmId": "P001878"},
+            headers={"REQFOUNDATAION": "nexacro", "Content-Type": "text/plain; charset=UTF-8"},
+            body_template={
+                "dataset": "DS_COND02",
+                "columns": ["stuno", "yy", "tmGbn"],
+            },
+        ),
+        privacy=PrivacyPolicy(
+            mask_fields=["studentNumber"],
+            retention="TRANSIENT",
+        ),
+        default_card_type="LIST_CARD",
+    ),
+    "PORTAL_GET_GRADE_REPORT": ActionRule(
+        action_id="PORTAL_GET_GRADE_REPORT",
+        domain="PORTAL",
+        protocol="NEXACRO_SSV",
+        title="성적 및 취득학점 종합 조회",
+        description="포털 종합정보시스템(ERP 개인학적조회 성적탭)에서 학기별 성적, 과목별 성적, 이수구분별 취득학점, 교양 영역별 이수 현황을 조회합니다.",
         version="1.0.0",
         target=RuleTarget(
-            url="/uni/cour/CorrCtr/findStdSukangAplyList.do",
+            url="/uni/sreg/TsimCtr/findTmClsfMrksList.do",
             method="POST",
-            params={"menuId": "M003150", "pgmId": "P001416"},
+            params={"menuId": "M002043", "pgmId": "P001878"},
             headers={"REQFOUNDATAION": "nexacro", "Content-Type": "text/plain; charset=UTF-8"},
             body_template={
                 "dataset": "DS_COND",
-                "columns": ["deptClsfCd", "yy", "tmGbn", "stuno", "korNm", "pageType"],
-                "values": {
-                    "deptClsfCd": "0000587",
-                    "pageType": "sukang"
-                }
+                "columns": ["stuno", "korNm", "gbn", "colgGrscCd", "colgCd", "earnMintStom"],
+                "values": {"earnMintStom": "1"}
+            },
+        ),
+        privacy=PrivacyPolicy(
+            mask_fields=["studentNumber"],
+            retention="TRANSIENT",
+        ),
+        default_card_type="METRIC_CARD",
+    ),
+    "PORTAL_GET_SCHOLARSHIP": ActionRule(
+        action_id="PORTAL_GET_SCHOLARSHIP",
+        domain="PORTAL",
+        protocol="NEXACRO_SSV",
+        title="장학금 수혜 내역 조회",
+        description="포털 종합정보시스템(ERP 개인학적조회 장학탭)에서 학기별 장학금 명칭, 수혜 금액 및 지급 방식을 조회합니다.",
+        version="1.0.0",
+        target=RuleTarget(
+            url="/uni/sreg/TsimCtr/findScalCtntList.do",
+            method="POST",
+            params={"menuId": "M002043", "pgmId": "P001878"},
+            headers={"REQFOUNDATAION": "nexacro", "Content-Type": "text/plain; charset=UTF-8"},
+            body_template={
+                "dataset": "DS_COND",
+                "columns": ["stuno", "korNm", "gbn", "colgGrscCd", "colgCd", "earnMintStom"],
+                "values": {"earnMintStom": "1"}
             },
         ),
         privacy=PrivacyPolicy(
@@ -158,3 +202,4 @@ DEFAULT_ACTION_RULES: Dict[str, ActionRule] = {
         default_card_type="LIST_CARD",
     ),
 }
+
