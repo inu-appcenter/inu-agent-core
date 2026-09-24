@@ -121,6 +121,20 @@ class OpenApiTool(BaseTool):
                     elif isinstance(data, dict) and "contents" in data:
                         data["items"] = list_payload
 
+                # Guardrail for Unified Search: truncate each section's items to top 3 to prevent token exhaustion
+                if isinstance(data, dict) and any(k in data for k in ["notices", "departmentNotices", "directory", "schedules", "courses", "clubs", "posts"]):
+                    compact_data = {}
+                    for k, v in data.items():
+                        if isinstance(v, dict) and "items" in v and isinstance(v["items"], list):
+                            items_list = v["items"]
+                            compact_data[k] = {
+                                "totalCount": v.get("totalCount", len(items_list)),
+                                "items": items_list[:3],
+                            }
+                        else:
+                            compact_data[k] = v
+                    return compact_data
+
                 return data
             except Exception as e:
                 logger.error(f"Failed to execute OpenApiTool [{self.name}]: {e}", exc_info=True)
@@ -201,6 +215,8 @@ class OpenApiConnector:
 
     def _infer_category(self, path: str, tags: List[str]) -> str:
         p = path.lower()
+        if "/search" in p:
+            return "SEARCH"
         if "/cafeteria" in p:
             return "CAFETERIA"
         if "/bus" in p or "buses" in p or "shuttle" in p:

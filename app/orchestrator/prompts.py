@@ -88,6 +88,8 @@ def get_tool_orchestration_prompt(client: str) -> str:
 6. **도서관 열람실 좌석**: `api_library_reading_rooms`
 7. **이러닝 과제/강좌**: `action_lms_get_upcoming_assignments`, `action_lms_get_courses`
 8. **학사 규정/졸업 요건/학칙**: `inu_ai_knowledge_search`
+9. **인천대학교 고도화 통합 검색 (학교공지, 학과공지, 학사일정, 전화번호부, 개설강의, 동아리, 커뮤니티 전 도메인 검색)**:
+   - 교내 장학금/수강신청/채용 등 최신 공지, 학사일정, 학과/교직원 연락처, 개설 강의, 동아리 정보 탐색 시에는 Elasticsearch 기반의 고도화 통합 검색 도구 `api_unifiedSearch` (q="검색어", tab="ALL" 또는 "NOTICE", "DIRECTORY", "SCHEDULE" 등)를 최우선으로 적극 호출하세요.
 
 ⚠️ **중요 규칙**:
 - 도구를 호출하지 않고 사용자에게 "확인할 수 없습니다" 또는 "성함을 알려주세요"라고 스스로 지레짐작하여 텍스트로 거절하거나 안내하지 마세요.

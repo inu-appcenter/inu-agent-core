@@ -71,6 +71,8 @@ class CardSynthesizer:
             return cls._build_keyword_card(data)
         elif domain in ["SETTINGS", "MY_SETTINGS"] or "settings" in tool_name.lower():
             return cls._build_settings_card(data)
+        elif domain in ["SEARCH", "UNIFIED_SEARCH"] or "unifiedsearch" in tool_name.lower() or "search" in tool_name.lower():
+            return cls._build_unified_search_card(data, query=query)
 
         return None
 
@@ -740,3 +742,144 @@ class CardSynthesizer:
             data=data if isinstance(data, dict) else {},
             link=CardLink(label="전체 알림 설정", route="/mypage/notification"),
         )
+
+    @classmethod
+    def _build_unified_search_card(cls, data: Optional[Any] = None, query: Optional[str] = None) -> Optional[ListCard]:
+        if not data or not isinstance(data, dict):
+            return None
+
+        if "error" in data:
+            return None
+
+        q = data.get("query") or query or ""
+        total_count = data.get("totalCount", 0)
+        items: List[ListItem] = []
+
+        # 1. Directory (교직원 / 학과 연락처)
+        dir_sec = data.get("directory")
+        if isinstance(dir_sec, dict) and dir_sec.get("items"):
+            for d in dir_sec["items"][:2]:
+                name = d.get("name") or "교직원/학과"
+                aff = d.get("detailAffiliation") or d.get("affiliation") or ""
+                phone = d.get("phoneNumber") or ""
+                pos = d.get("position") or d.get("duties") or ""
+                sub = f"📞 {phone}  {pos}".strip() if phone else pos
+                items.append(
+                    ListItem(
+                        title=f"{name} ({aff})" if aff else name,
+                        subtitle=sub or None,
+                        tag="연락처",
+                    )
+                )
+
+        # 2. Notices (학교 공지사항)
+        notices_sec = data.get("notices")
+        if isinstance(notices_sec, dict) and notices_sec.get("items"):
+            for n in notices_sec["items"][:2]:
+                title = n.get("title") or "공지사항"
+                date_val = n.get("createDate") or ""
+                writer = n.get("writer") or n.get("category") or "공지"
+                url = n.get("url")
+                items.append(
+                    ListItem(
+                        title=str(title),
+                        subtitle=f"{writer} | {date_val}" if date_val else writer,
+                        tag="학교공지",
+                        link=url,
+                    )
+                )
+
+        # 3. Department Notices (학과 공지)
+        dept_sec = data.get("departmentNotices")
+        if isinstance(dept_sec, dict) and dept_sec.get("items"):
+            for dn in dept_sec["items"][:2]:
+                title = dn.get("title") or "학과공지"
+                dept = dn.get("department") or "학과"
+                date_val = dn.get("createDate") or ""
+                url = dn.get("url")
+                items.append(
+                    ListItem(
+                        title=str(title),
+                        subtitle=f"{dept} | {date_val}" if date_val else dept,
+                        tag="학과공지",
+                        link=url,
+                    )
+                )
+
+        # 4. Schedules (학사일정)
+        sched_sec = data.get("schedules")
+        if isinstance(sched_sec, dict) and sched_sec.get("items"):
+            for s in sched_sec["items"][:2]:
+                content = s.get("content") or "학사일정"
+                start = s.get("startDate") or ""
+                end = s.get("endDate") or ""
+                date_str = f"{start} ~ {end}" if start and end else (start or end)
+                items.append(
+                    ListItem(
+                        title=str(content),
+                        subtitle=f"📅 {date_str}" if date_str else None,
+                        tag="학사일정",
+                    )
+                )
+
+        # 5. Courses (개설 강의)
+        course_sec = data.get("courses")
+        if isinstance(course_sec, dict) and course_sec.get("items"):
+            for c in course_sec["items"][:2]:
+                c_name = c.get("courseName") or "강의"
+                prof = c.get("professor") or ""
+                room = c.get("timeRoom") or ""
+                credit = c.get("credit")
+                sub = f"{prof} 교수 | {room} ({credit}학점)" if prof else room
+                items.append(
+                    ListItem(
+                        title=str(c_name),
+                        subtitle=sub.strip() if sub else None,
+                        tag="개설강의",
+                    )
+                )
+
+        # 6. Clubs (동아리)
+        club_sec = data.get("clubs")
+        if isinstance(club_sec, dict) and club_sec.get("items"):
+            for cl in club_sec["items"][:2]:
+                name = cl.get("name") or "동아리"
+                cat = cl.get("category") or ""
+                room = cl.get("room") or ""
+                items.append(
+                    ListItem(
+                        title=str(name),
+                        subtitle=f"{cat} | {room}".strip(" |") or None,
+                        tag="동아리",
+                    )
+                )
+
+        # 7. Posts (커뮤니티)
+        post_sec = data.get("posts")
+        if isinstance(post_sec, dict) and post_sec.get("items"):
+            for p in post_sec["items"][:2]:
+                title = p.get("title") or "게시글"
+                board = p.get("board") or "커뮤니티"
+                likes = p.get("likeCount", 0)
+                comments = p.get("commentCount", 0)
+                items.append(
+                    ListItem(
+                        title=str(title),
+                        subtitle=f"👍 {likes}  💬 {comments}",
+                        tag=str(board),
+                    )
+                )
+
+        if not items:
+            return None
+
+        title_text = f"🔍 '{q}' 통합 검색 결과" if q else "🔍 인천대 통합 검색 결과"
+        if total_count > 0:
+            title_text += f" (총 {total_count}건)"
+
+        return ListCard(
+            title=title_text,
+            items=items[:6],
+            footer_text="인천대학교 포털 고도화 통합 검색(Elasticsearch) 결과입니다.",
+        )
+

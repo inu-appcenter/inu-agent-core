@@ -56,7 +56,7 @@ def test_tool_pruner():
     directory_query = "컴공 과사 전화번호 알려줘"
     pruned = ToolPruner.prune(directory_query, tools, client="INTIP", max_tools=2)
     assert len(pruned) >= 1
-    assert pruned[0].category == "DIRECTORY"
+    assert any(t.category in ["DIRECTORY", "SEARCH"] for t in pruned)
 
 
 def test_token_relay_and_execution():
@@ -127,3 +127,52 @@ def test_large_result_truncation_guardrail():
             assert "notice" in result
 
     asyncio.run(_test())
+
+
+def test_unified_search_parsing_and_card_synthesis():
+    from app.orchestrator.card_synthesizer import CardSynthesizer
+    sample_path = Path(__file__).parent.parent / "app" / "tools" / "schemas" / "inu_portal_sample.json"
+    with open(sample_path, "r", encoding="utf-8") as f:
+        spec = json.load(f)
+
+    connector = OpenApiConnector()
+    tools = connector.parse_spec(spec)
+    tool_names = [t.name for t in tools]
+    assert "api_unifiedSearch" in tool_names
+
+    search_tool = next(t for t in tools if t.name == "api_unifiedSearch")
+    assert search_tool.category == "SEARCH"
+
+    # Test Card Synthesis
+    mock_search_data = {
+        "query": "장학금",
+        "tab": "ALL",
+        "totalCount": 10,
+        "notices": {
+            "totalCount": 3,
+            "items": [
+                {"id": 1, "title": "2026-2학기 교내장학금 신청 안내", "writer": "학생지원과", "createDate": "2026-09-01", "url": "/notice/1"},
+            ]
+        },
+        "directory": {
+            "totalCount": 1,
+            "items": [
+                {"name": "홍길동", "affiliation": "학생처", "detailAffiliation": "학생지원과", "phoneNumber": "032-835-9000", "position": "담당관"}
+            ]
+        }
+    }
+
+    card = CardSynthesizer.synthesize_for_domain(
+        domain="SEARCH",
+        tool_name="api_unifiedSearch",
+        data=mock_search_data,
+        query="장학금 신청 기간 알려줘",
+    )
+    assert card is not None
+    assert card.card_type == "LIST_CARD"
+    assert "장학금" in card.title
+    assert len(card.items) >= 2
+    tags = [it.tag for it in card.items]
+    assert "학교공지" in tags
+    assert "연락처" in tags
+

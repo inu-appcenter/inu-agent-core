@@ -46,12 +46,15 @@ def resolve_tool_display_name(category: str, name: str) -> str:
         "DAILY_BRIEF": "데일리 브리프 아침 일정 설정",
         "KEYWORD": "공지사항 키워드 알림 구독",
         "SETTINGS": "내 맞춤 알림 및 브리프 설정 종합",
+        "SEARCH": "인천대학교 전 도메인 고도화 통합 검색",
     }
     if category in category_map:
         return category_map[category]
 
     name_lower = name.lower()
-    if "watch" in name_lower or "sniper" in name_lower:
+    if "unified" in name_lower or "search" in name_lower:
+        return "인천대학교 전 도메인 고도화 통합 검색"
+    elif "watch" in name_lower or "sniper" in name_lower:
         return "학산도서관 실시간 빈자리 알림 예약"
     elif "timetable" in name_lower:
         return "학사 강의 시간표 정보"
@@ -96,7 +99,7 @@ class AgentOrchestrator:
 
         # Ensure essential core domain tools are available in the candidate pool
         core_categories = [
-            "PORTAL", "LMS", "DIRECTORY", "INU_AI_KNOWLEDGE", "LIBRARY",
+            "SEARCH", "PORTAL", "LMS", "DIRECTORY", "INU_AI_KNOWLEDGE", "LIBRARY",
             "CAFETERIA", "BUS", "TIMETABLE", "CAMPUS_WATCH", "NOTICE", "SCHEDULE"
         ]
         existing_cats = {t.category.upper() for t in candidate_tools}
