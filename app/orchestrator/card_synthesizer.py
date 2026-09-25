@@ -347,9 +347,9 @@ class CardSynthesizer:
                 title = n.get("title") or "공지사항"
                 date_val = n.get("createDate") or n.get("date") or ""
                 cat = n.get("category") or n.get("subCategory") or "공지"
-                notice_url = n.get("url") or n.get("link")
-                if not notice_url and n.get("id"):
-                    notice_url = f"/home/notice/{n.get('id')}"
+                notice_id = n.get("id")
+                # INTIP 내부 상세 페이지 경로 (/home/notice/{id}) 우선 연결하여 외부 브라우저 이탈 방지
+                notice_url = f"/home/notice/{notice_id}" if notice_id else (n.get("url") or n.get("link"))
 
                 items.append(
                     ListItem(
@@ -779,13 +779,15 @@ class CardSynthesizer:
                 title = n.get("title") or "공지사항"
                 date_val = n.get("createDate") or ""
                 writer = n.get("writer") or n.get("category") or "공지"
-                url = n.get("url")
+                notice_id = n.get("id")
+                # INTIP 내부 상세 페이지 경로 (/home/notice/{id}) 우선 연결하여 외부 브라우저 이탈 방지
+                notice_url = f"/home/notice/{notice_id}" if notice_id else (n.get("url") or "")
                 items.append(
                     ListItem(
                         title=str(title),
                         subtitle=f"{writer} | {date_val}" if date_val else writer,
                         tag="학교공지",
-                        link=url,
+                        link=notice_url,
                     )
                 )
 

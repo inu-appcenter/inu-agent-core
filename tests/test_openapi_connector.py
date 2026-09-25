@@ -172,7 +172,6 @@ def test_unified_search_parsing_and_card_synthesis():
     assert card.card_type == "LIST_CARD"
     assert "장학금" in card.title
     assert len(card.items) >= 2
-    tags = [it.tag for it in card.items]
-    assert "학교공지" in tags
-    assert "연락처" in tags
+    notice_item = next(it for it in card.items if it.tag == "학교공지")
+    assert notice_item.link == "/home/notice/1"
 

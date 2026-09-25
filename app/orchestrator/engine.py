@@ -846,6 +846,31 @@ class AgentOrchestrator:
                                 lines.append(f"- 검색어 '{q_param}' 관련 교수/교직원 개인 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다.")
                                 lines.append("💡 지침: 교수님 개인 연락처가 조회되지 않고 학과 사무실 번호만 있는 경우, '{교수명} 교수님의 개인 연락처는 등록되어 있지 않으나, 소속 학과인 {학과명} 학과 사무실({번호})로 문의하실 수 있습니다'라고 맥락을 밝혀 친절히 안내하세요.")
                             summary_out = "\n".join(lines) + "\n"
+                    elif tool.category == "NOTICE":
+                        tool_data = res
+                        notices_list = []
+                        if isinstance(res, list):
+                            notices_list = res
+                        elif isinstance(res, dict):
+                            notices_list = res.get("contents") or res.get("items") or res.get("notices") or []
+
+                        lines = [f"\n[인천대학교 공지사항 조회 결과 ({tool_display_name})]:"]
+                        if notices_list:
+                            for n in notices_list[:5]:
+                                if isinstance(n, dict):
+                                    t = n.get("title") or "공지사항"
+                                    n_id = n.get("id")
+                                    # INTIP 내부 상세 페이지 경로 (/home/notice/{id}) 연결로 외부 브라우저 이탈 방지
+                                    u = f"/home/notice/{n_id}" if n_id else (n.get("url") or "")
+                                    d = n.get("createDate") or n.get("date") or ""
+                                    w = n.get("writer") or n.get("category") or ""
+                                    link_str = f"[{t}]({u})" if u else t
+                                    sub_str = f" (게시일: {d}, 작성: {w})" if d or w else ""
+                                    lines.append(f"- {link_str}{sub_str}")
+                            lines.append("💡 [중요 지침]: 위 공지 제목과 내부 상세 링크(/home/notice/{공지ID})를 마크다운 링크 형식([공지제목](/home/notice/{id}))으로 답변에 그대로 포함하여 안내하세요. 외부 브라우저로 나가지 않고 INTIP 앱 내부 상세 페이지로 열립니다.")
+                        else:
+                            lines.append("- 조회된 공지사항이 없습니다.")
+                        summary_out = "\n".join(lines) + "\n"
                     elif tool.category == "SEARCH" or "unifiedsearch" in tool.name.lower():
                         tool_data = res
                         if isinstance(res, dict):
@@ -858,7 +883,9 @@ class AgentOrchestrator:
                                 lines.append("- 📢 학교 공지사항:")
                                 for n in notices[:5]:
                                     t = n.get("title") or "공지사항"
-                                    u = n.get("url") or ""
+                                    n_id = n.get("id")
+                                    # INTIP 내부 상세 페이지 경로 (/home/notice/{id}) 연결로 외부 브라우저 이탈 방지
+                                    u = f"/home/notice/{n_id}" if n_id else (n.get("url") or "")
                                     d = n.get("createDate") or ""
                                     w = n.get("writer") or n.get("category") or ""
                                     link_str = f"[{t}]({u})" if u else t
@@ -923,7 +950,7 @@ class AgentOrchestrator:
                                 lines.append("- 검색 결과가 0건입니다.")
                                 lines.append("💡 [자율 재검색 지침]: 결과가 0건이므로, 질문에서 불필요한 수식어를 덜어내거나 상위어/동의어로 검색어를 완화하여 1회 재검색(Query Expansion)할 수 있습니다. 이미 재검색했거나 마땅한 키워드가 없으면 검색 결과가 없음을 친절히 안내하세요.")
                             else:
-                                lines.append("💡 [중요 지침]: 검색 결과가 충분히 확보되었습니다. 추가 도구 호출을 즉시 중단하고, 위 공지 제목과 URL을 표나 목록에 마크다운 링크([공지제목](공지URL)) 형태로 그대로 포함하여 최종 답변을 작성하세요. 단순 텍스트로만 제목을 적지 마십시오.")
+                                lines.append("💡 [중요 지침]: 검색 결과가 충분히 확보되었습니다. 추가 도구 호출을 즉시 중단하고, 위 공지 제목과 제공된 링크(학교공지는 INTIP 내부 상세 경로인 /home/notice/{공지ID})를 표나 목록에 마크다운 링크([공지제목](링크)) 형태로 그대로 포함하여 최종 답변을 작성하세요. 단순 텍스트로만 제목을 적지 마십시오.")
 
                             summary_out = "\n".join(lines) + "\n"
                         else:
