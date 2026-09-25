@@ -147,6 +147,8 @@ class AgentOrchestrator:
         tool_summary_text = ""
         academic_data_dict = {}
         inuchat_rag_data = None
+        executed_tool_signatures = set()
+        successful_search_queries = set()
 
         # 3. Native Tool Calling ReAct Loop (Autonomous Multi-Hop)
         MAX_HOPS = 4
@@ -175,6 +177,44 @@ class AgentOrchestrator:
             if not tool_calls:
                 # No more tools needed, proceed to final response
                 break
+
+            # Deduplication & Loop Prevention Guardrail:
+            # 1. Check if all proposed tool calls in this hop are identical repeats of already executed calls
+            all_repeated = True
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                fn_name = fn.get("name", "")
+                fn_args = fn.get("arguments", {})
+                sig = f"{fn_name}:{json.dumps(fn_args, sort_keys=True)}"
+                if sig not in executed_tool_signatures:
+                    all_repeated = False
+                    break
+
+            if all_repeated:
+                logger.info(f"ReAct Loop break: All tool calls in hop {hop + 1} were identical repeats. Proceeding to synthesis.")
+                break
+
+            # 2. Filter out redundant search calls if a search has already succeeded with results
+            filtered_calls = []
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                fn_name = fn.get("name", "")
+                fn_args = fn.get("arguments", {})
+                sig = f"{fn_name}:{json.dumps(fn_args, sort_keys=True)}"
+                target_tool_check = tool_registry.get_tool(fn_name)
+                is_search = target_tool_check and (target_tool_check.category == "SEARCH" or "unifiedsearch" in target_tool_check.name.lower())
+                q_arg = fn_args.get("q", "")
+                if is_search and q_arg in successful_search_queries:
+                    logger.info(f"Skipping redundant search call for already satisfied query '{q_arg}'")
+                    continue
+                filtered_calls.append(tc)
+                executed_tool_signatures.add(sig)
+
+            if not filtered_calls:
+                logger.info("ReAct Loop break: No new non-redundant tool calls remaining. Proceeding to synthesis.")
+                break
+
+            tool_calls = filtered_calls
 
             # Append assistant's tool-calling message to history
             raw_msg = response.get("raw_message") or {
@@ -255,6 +295,11 @@ class AgentOrchestrator:
 
                 executed_categories.add(target_tool.category.upper())
                 executed_tool_names.add(target_tool.name)
+
+                if (target_tool.category == "SEARCH" or "unifiedsearch" in target_tool.name.lower()) and "총 0건" not in tool_obs:
+                    q_val = fn_args.get("q", "")
+                    if q_val:
+                        successful_search_queries.add(q_val)
 
                 if not tool_obs:
                     tool_obs = json.dumps(
@@ -801,6 +846,88 @@ class AgentOrchestrator:
                                 lines.append(f"- 검색어 '{q_param}' 관련 교수/교직원 개인 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다.")
                                 lines.append("💡 지침: 교수님 개인 연락처가 조회되지 않고 학과 사무실 번호만 있는 경우, '{교수명} 교수님의 개인 연락처는 등록되어 있지 않으나, 소속 학과인 {학과명} 학과 사무실({번호})로 문의하실 수 있습니다'라고 맥락을 밝혀 친절히 안내하세요.")
                             summary_out = "\n".join(lines) + "\n"
+                    elif tool.category == "SEARCH" or "unifiedsearch" in tool.name.lower():
+                        tool_data = res
+                        if isinstance(res, dict):
+                            total_cnt = res.get("totalCount", 0)
+                            q_val = res.get("query", "")
+                            lines = [f"\n[인천대학교 통합 검색 결과 (검색어: '{q_val}', 총 {total_cnt}건)]:"]
+
+                            notices = res.get("notices", {}).get("items", []) if isinstance(res.get("notices"), dict) else []
+                            if notices:
+                                lines.append("- 📢 학교 공지사항:")
+                                for n in notices[:5]:
+                                    t = n.get("title") or "공지사항"
+                                    u = n.get("url") or ""
+                                    d = n.get("createDate") or ""
+                                    w = n.get("writer") or n.get("category") or ""
+                                    link_str = f"[{t}]({u})" if u else t
+                                    sub_str = f" (게시일: {d}, 작성: {w})" if d or w else ""
+                                    lines.append(f"  • {link_str}{sub_str}")
+
+                            dept_notices = res.get("departmentNotices", {}).get("items", []) if isinstance(res.get("departmentNotices"), dict) else []
+                            if dept_notices:
+                                lines.append("- 📢 학과 공지사항:")
+                                for dn in dept_notices[:5]:
+                                    t = dn.get("title") or "학과공지"
+                                    u = dn.get("url") or ""
+                                    dept = dn.get("departmentName") or dn.get("department") or ""
+                                    d = dn.get("createDate") or ""
+                                    link_str = f"[{t}]({u})" if u else t
+                                    sub_str = f" (학과: {dept}, 게시일: {d})" if dept or d else ""
+                                    lines.append(f"  • {link_str}{sub_str}")
+
+                            dirs = res.get("directory", {}).get("items", []) if isinstance(res.get("directory"), dict) else []
+                            if dirs:
+                                lines.append("- 📞 교직원 및 학과 연락처:")
+                                for di in dirs[:3]:
+                                    name = di.get("name") or "교직원/학과"
+                                    aff = di.get("detailAffiliation") or di.get("affiliation") or ""
+                                    phone = di.get("phoneNumber") or ""
+                                    pos = di.get("position") or di.get("duties") or ""
+                                    lines.append(f"  • {name} ({aff}): 📞 {phone} {pos}".strip())
+
+                            scheds = res.get("schedules", {}).get("items", []) if isinstance(res.get("schedules"), dict) else []
+                            if scheds:
+                                lines.append("- 📅 학사일정:")
+                                for s in scheds[:3]:
+                                    content = s.get("content") or "학사일정"
+                                    start = s.get("startDate") or ""
+                                    end = s.get("endDate") or ""
+                                    date_str = f" (기간: {start} ~ {end})" if start and end else ""
+                                    lines.append(f"  • {content}{date_str}")
+
+                            courses = res.get("courses", {}).get("items", []) if isinstance(res.get("courses"), dict) else []
+                            if courses:
+                                lines.append("- 📚 개설강의:")
+                                for c in courses[:3]:
+                                    c_name = c.get("courseName") or "강의"
+                                    prof = c.get("professor") or ""
+                                    time_room = c.get("timeRoom") or ""
+                                    credit = c.get("credit") or ""
+                                    lines.append(f"  • {c_name} ({prof} 교수, {time_room}, {credit}학점)".strip())
+
+                            clubs = res.get("clubs", {}).get("items", []) if isinstance(res.get("clubs"), dict) else []
+                            if clubs:
+                                lines.append("- 🎯 동아리:")
+                                for cl in clubs[:3]:
+                                    lines.append(f"  • {cl.get('name')} ({cl.get('category')}, {cl.get('room')})")
+
+                            posts = res.get("posts", {}).get("items", []) if isinstance(res.get("posts"), dict) else []
+                            if posts:
+                                lines.append("- 💬 커뮤니티:")
+                                for p in posts[:3]:
+                                    lines.append(f"  • {p.get('title')} ({p.get('board')}, 추천: {p.get('likeCount')})")
+
+                            if total_cnt == 0:
+                                lines.append("- 검색 결과가 0건입니다.")
+                                lines.append("💡 [자율 재검색 지침]: 결과가 0건이므로, 질문에서 불필요한 수식어를 덜어내거나 상위어/동의어로 검색어를 완화하여 1회 재검색(Query Expansion)할 수 있습니다. 이미 재검색했거나 마땅한 키워드가 없으면 검색 결과가 없음을 친절히 안내하세요.")
+                            else:
+                                lines.append("💡 [중요 지침]: 검색 결과가 충분히 확보되었습니다. 추가 도구 호출을 즉시 중단하고, 위 공지 제목과 URL을 표나 목록에 마크다운 링크([공지제목](공지URL)) 형태로 그대로 포함하여 최종 답변을 작성하세요. 단순 텍스트로만 제목을 적지 마십시오.")
+
+                            summary_out = "\n".join(lines) + "\n"
+                        else:
+                            summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
                     else:
                         tool_data = res
                         summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
