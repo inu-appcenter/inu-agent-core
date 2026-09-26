@@ -150,25 +150,48 @@ class AgentOrchestrator:
         executed_tool_signatures = set()
         successful_search_queries = set()
 
-        # 3. Native Tool Calling ReAct Loop (Autonomous Multi-Hop)
+        # 3. Native Tool Calling ReAct Loop (Autonomous Multi-Hop with Streaming Thought)
         MAX_HOPS = 4
         for hop in range(MAX_HOPS):
+            response = None
+            streamed_any_thought = False
             try:
-                response = await llm_client.chat_with_tools(
+                async for event_type, data in llm_client.stream_chat_with_tools(
                     messages=messages,
                     tools=openai_tools,
                     tool_choice="auto",
                     temperature=0.1,
-                )
+                ):
+                    if event_type == "thinking_chunk" and data:
+                        streamed_any_thought = True
+                        yield AgentStreamEvent(
+                            event_type="THINKING",
+                            thinking=data,
+                        )
+                    elif event_type == "done":
+                        response = data
             except Exception as ex:
-                logger.warning(f"LLM tool calling step {hop + 1} failed: {ex}")
+                logger.warning(f"LLM streaming tool calling step {hop + 1} failed: {ex}. Trying non-streaming fallback...")
+                try:
+                    response = await llm_client.chat_with_tools(
+                        messages=messages,
+                        tools=openai_tools,
+                        tool_choice="auto",
+                        temperature=0.1,
+                    )
+                except Exception as fb_ex:
+                    logger.warning(f"Fallback also failed: {fb_ex}")
+                    break
+
+            if not response:
                 break
 
             thought = response.get("thought") or ""
             content = response.get("content") or ""
             tool_calls = response.get("tool_calls") or []
 
-            if thought:
+            # If thought was not streamed token-by-token, yield it now
+            if thought and not streamed_any_thought:
                 yield AgentStreamEvent(
                     event_type="THINKING",
                     thinking=thought,

@@ -8,6 +8,73 @@ import httpx
 
 from app.core.config import settings
 from app.core.logging import logger
+import re
+
+
+class StreamingThoughtExtractor:
+    """
+    Extracts and yields thinking/reasoning tokens in real-time as JSON tokens stream in.
+    Captures:
+    1) {"thought": "...streaming text..."}
+    2) <thought>...streaming text...</thought>
+    """
+    def __init__(self):
+        self.buffer = ""
+        self.in_thought = False
+        self.finished_thought = False
+        self.emitted_idx = 0
+
+    def feed(self, chunk: str) -> List[str]:
+        if self.finished_thought:
+            return []
+
+        self.buffer += chunk
+        tokens_to_emit = []
+
+        if not self.in_thought:
+            m = re.search(r'"thought"\s*:\s*"', self.buffer)
+            if m:
+                self.in_thought = True
+                self.emitted_idx = m.end()
+
+        if self.in_thought:
+            i = self.emitted_idx
+            emit_start = i
+            while i < len(self.buffer):
+                char = self.buffer[i]
+                if char == '\\':
+                    i += 2
+                    continue
+                elif char == '"':
+                    thought_slice = self.buffer[emit_start:i]
+                    decoded = self._unescape_json_string(thought_slice)
+                    if decoded:
+                        tokens_to_emit.append(decoded)
+                    self.in_thought = False
+                    self.finished_thought = True
+                    self.emitted_idx = i + 1
+                    break
+                else:
+                    i += 1
+
+            if self.in_thought and i > emit_start:
+                if self.buffer[i - 1] == '\\':
+                    i -= 1
+                thought_slice = self.buffer[emit_start:i]
+                decoded = self._unescape_json_string(thought_slice)
+                if decoded:
+                    tokens_to_emit.append(decoded)
+                self.emitted_idx = i
+
+        return tokens_to_emit
+
+    @staticmethod
+    def _unescape_json_string(s: str) -> str:
+        try:
+            return json.loads(f'"{s}"')
+        except Exception:
+            return s.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t').replace('\\\\', '\\')
+
 
 
 class LLMClient:
@@ -132,6 +199,258 @@ class LLMClient:
                 logger.error(f"Error during guided JSON completion: {e}", exc_info=True)
                 raise e
 
+
+    async def stream_chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: str = "auto",
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> AsyncGenerator[tuple[str, Any], None]:
+        """
+        Stream LLM tool calling completion, yielding real-time thinking tokens and final result.
+        Yields:
+            ("thinking_chunk", token_str)
+            ("content_chunk", token_str)
+            ("done", { "thought": ..., "tool_calls": ..., "content": ..., "raw_message": ... })
+        """
+        target_model = model or settings.LLM_MODEL_NAME
+        temp = temperature if temperature is not None else settings.LLM_TEMPERATURE
+        max_tok = max_tokens or settings.LLM_MAX_TOKENS
+        headers = self._get_headers()
+        url = f"{self._base_url}/chat/completions"
+
+        # Attempt 1: Native OpenAI tools API with stream=True
+        if tools:
+            payload = {
+                "model": target_model,
+                "messages": messages,
+                "temperature": temp,
+                "max_tokens": max_tok,
+                "stream": True,
+                "tools": tools,
+                "tool_choice": tool_choice,
+            }
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    async with client.stream("POST", url, json=payload, headers=headers) as response:
+                        if response.status_code == 200:
+                            accumulated_content = ""
+                            accumulated_thought = ""
+                            tool_calls_map: Dict[int, Dict[str, Any]] = {}
+
+                            async for line in response.aiter_lines():
+                                line = line.strip()
+                                if not line or not line.startswith("data: "):
+                                    continue
+                                if line == "data: [DONE]":
+                                    break
+
+                                try:
+                                    chunk_data = json.loads(line[6:])
+                                    choices = chunk_data.get("choices", [])
+                                    if not choices:
+                                        continue
+                                    delta = choices[0].get("delta", {})
+
+                                    # Check reasoning_content
+                                    reasoning = delta.get("reasoning_content")
+                                    if reasoning:
+                                        accumulated_thought += reasoning
+                                        yield ("thinking_chunk", reasoning)
+
+                                    # Check content
+                                    content = delta.get("content")
+                                    if content:
+                                        accumulated_content += content
+                                        yield ("content_chunk", content)
+
+                                    # Check tool_calls
+                                    tcs = delta.get("tool_calls", [])
+                                    for tc in tcs:
+                                        idx = tc.get("index", 0)
+                                        if idx not in tool_calls_map:
+                                            tool_calls_map[idx] = {
+                                                "id": tc.get("id") or f"call_{idx}",
+                                                "type": "function",
+                                                "function": {
+                                                    "name": tc.get("function", {}).get("name", ""),
+                                                    "arguments": tc.get("function", {}).get("arguments", ""),
+                                                }
+                                            }
+                                        else:
+                                            if tc.get("id"):
+                                                tool_calls_map[idx]["id"] = tc.get("id")
+                                            if tc.get("function", {}).get("name"):
+                                                tool_calls_map[idx]["function"]["name"] += tc["function"]["name"]
+                                            if tc.get("function", {}).get("arguments"):
+                                                tool_calls_map[idx]["function"]["arguments"] += tc["function"]["arguments"]
+                                except Exception:
+                                    continue
+
+                            # Finalize native parsed tool calls
+                            parsed_tool_calls = []
+                            for idx in sorted(tool_calls_map.keys()):
+                                tc_item = tool_calls_map[idx]
+                                raw_args = tc_item["function"]["arguments"]
+                                try:
+                                    parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                                except Exception:
+                                    parsed_args = {"query": raw_args}
+                                tc_item["function"]["arguments"] = parsed_args
+                                parsed_tool_calls.append(tc_item)
+
+                            yield ("done", {
+                                "content": accumulated_content,
+                                "thought": accumulated_thought,
+                                "tool_calls": parsed_tool_calls,
+                                "raw_message": {
+                                    "role": "assistant",
+                                    "content": accumulated_content,
+                                    "tool_calls": parsed_tool_calls,
+                                },
+                            })
+                            return
+                        else:
+                            logger.info(
+                                f"Native streaming tools API returned {response.status_code}. "
+                                "Falling back to streaming Prompt ReAct mode..."
+                            )
+            except Exception as ex:
+                logger.info(f"Native streaming tools request failed: {ex}. Falling back to streaming Prompt ReAct mode...")
+
+        # Attempt 2: Streaming Structured Prompt ReAct Mode
+        async for event_type, data in self._stream_prompt_based_tool_calling(
+            messages=messages,
+            tools=tools,
+            model=target_model,
+            temperature=temp,
+            max_tokens=max_tok,
+        ):
+            yield (event_type, data)
+
+    async def _stream_prompt_based_tool_calling(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+    ) -> AsyncGenerator[tuple[str, Any], None]:
+        """
+        Execute tool selection via streaming structured JSON prompt orchestration.
+        Uses StreamingThoughtExtractor to stream thought tokens in real-time.
+        """
+        tools_catalog_lines = []
+        if tools:
+            for t in tools:
+                fn = t.get("function", t)
+                name = fn.get("name", "")
+                desc = fn.get("description", "")
+                params = fn.get("parameters", {}).get("properties", {})
+                param_list = ", ".join([f"{k} ({v.get('type', 'string')})" for k, v in params.items()])
+                tools_catalog_lines.append(f"- 도구명: `{name}` | 설명: {desc} | 매개변수: [{param_list}]")
+
+        catalog_text = "\n".join(tools_catalog_lines)
+        prompt_instruction = f"""
+[사용 가능한 도구 카탈로그]:
+{catalog_text}
+
+[응답 규칙 - 엄격한 JSON 형식]:
+사용자의 질문을 해결하기 위해 도구 호출이 필요하면 반드시 아래 JSON 형식으로 응답하세요:
+```json
+{{
+  "thought": "사용자의 질문을 해결하기 위해 이 도구를 선택한 이유와 파라미터 판단 근거",
+  "tool_calls": [
+    {{
+      "name": "도구명",
+      "arguments": {{ "매개변수명": "값" }}
+    }}
+  ]
+}}
+```
+
+모든 정보가 충분하여 더 이상의 도구 호출이 필요 없는 경우:
+```json
+{{
+  "thought": "필요한 모든 데이터가 수집되었으므로 최종 응답을 작성합니다.",
+  "tool_calls": []
+}}
+```
+마크다운 백틱 없이 유효한 JSON 문자열만 출력하세요.
+"""
+
+        augmented_messages: List[Dict[str, Any]] = []
+        has_system = False
+        for msg in messages:
+            if msg.get("role") == "system":
+                augmented_messages.append({
+                    "role": "system",
+                    "content": str(msg.get("content", "")) + "\n\n" + prompt_instruction
+                })
+                has_system = True
+            else:
+                augmented_messages.append(msg)
+
+        if not has_system:
+            augmented_messages.insert(0, {"role": "system", "content": prompt_instruction})
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": augmented_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+
+        url = f"{self._base_url}/chat/completions"
+        headers = self._get_headers()
+        extractor = StreamingThoughtExtractor()
+        accumulated_text = ""
+
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as response:
+                if response.status_code != 200:
+                    err_body = await response.aread()
+                    raise RuntimeError(f"Prompt ReAct LLM Server Error ({response.status_code}): {err_body.decode('utf-8', errors='ignore')[:200]}")
+
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    if line == "data: [DONE]":
+                        break
+
+                    try:
+                        chunk_data = json.loads(line[6:])
+                        choices = chunk_data.get("choices", [])
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
+                        content = delta.get("content")
+                        if content:
+                            accumulated_text += content
+                            thought_tokens = extractor.feed(content)
+                            for tok in thought_tokens:
+                                yield ("thinking_chunk", tok)
+                    except json.JSONDecodeError:
+                        continue
+
+        raw_content = accumulated_text.strip()
+        thought, tool_calls = self._parse_json_react_content(raw_content)
+
+        yield ("done", {
+            "content": raw_content if not tool_calls else "",
+            "thought": thought,
+            "tool_calls": tool_calls,
+            "raw_message": {
+                "role": "assistant",
+                "content": raw_content if not tool_calls else "",
+                "tool_calls": tool_calls,
+            },
+        })
 
     async def chat_with_tools(
         self,
