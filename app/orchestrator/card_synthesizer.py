@@ -378,21 +378,29 @@ class CardSynthesizer:
 
         for s in schedules[:4]:
             if isinstance(s, dict):
-                title = s.get("title") or "학사일정"
+                title = s.get("title") or s.get("content") or "학사일정"
                 start = s.get("start") or s.get("startDate") or ""
                 end = s.get("end") or s.get("endDate") or ""
                 date_str = f"{start} ~ {end}" if end and end != start else str(start)
+                cal_link = f"/home/calendar?date={start}" if start else "/home/calendar"
                 items.append(
                     ListItem(
                         title=str(title),
                         subtitle=date_str,
                         tag="일정",
-                        link="/home/calendar",
+                        link=cal_link,
                     )
                 )
 
         if not items:
             return None
+
+        return ListCard(
+            title="📅 인천대학교 주요 학사일정",
+            items=items,
+            footer_text="인팁 앱의 [학사일정]에서 전체 일정을 월별로 확인할 수 있습니다.",
+            link=CardLink(label="학사일정 전체보기", route="/home/calendar"),
+        )
 
     @classmethod
     def _build_lms_card(cls, data: Optional[Any] = None) -> Optional[GenerativeCard]:
@@ -821,6 +829,7 @@ class CardSynthesizer:
                         title=str(content),
                         subtitle=f"📅 {date_str}" if date_str else None,
                         tag="학사일정",
+                        link=f"/home/calendar?date={start}" if start else "/home/calendar",
                     )
                 )
 

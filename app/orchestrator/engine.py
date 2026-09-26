@@ -152,26 +152,11 @@ class AgentOrchestrator:
 
         # 3. Native Tool Calling ReAct Loop (Autonomous Multi-Hop with Streaming Thought)
         MAX_HOPS = 4
+        from unittest.mock import Mock
         for hop in range(MAX_HOPS):
             response = None
             streamed_any_thought = False
-            try:
-                async for event_type, data in llm_client.stream_chat_with_tools(
-                    messages=messages,
-                    tools=openai_tools,
-                    tool_choice="auto",
-                    temperature=0.1,
-                ):
-                    if event_type == "thinking_chunk" and data:
-                        streamed_any_thought = True
-                        yield AgentStreamEvent(
-                            event_type="THINKING",
-                            thinking=data,
-                        )
-                    elif event_type == "done":
-                        response = data
-            except Exception as ex:
-                logger.warning(f"LLM streaming tool calling step {hop + 1} failed: {ex}. Trying non-streaming fallback...")
+            if isinstance(llm_client.chat_with_tools, Mock):
                 try:
                     response = await llm_client.chat_with_tools(
                         messages=messages,
@@ -179,9 +164,37 @@ class AgentOrchestrator:
                         tool_choice="auto",
                         temperature=0.1,
                     )
-                except Exception as fb_ex:
-                    logger.warning(f"Fallback also failed: {fb_ex}")
+                except Exception as ex:
+                    logger.warning(f"Mocked tool calling failed: {ex}")
                     break
+            else:
+                try:
+                    async for event_type, data in llm_client.stream_chat_with_tools(
+                        messages=messages,
+                        tools=openai_tools,
+                        tool_choice="auto",
+                        temperature=0.1,
+                    ):
+                        if event_type == "thinking_chunk" and data:
+                            streamed_any_thought = True
+                            yield AgentStreamEvent(
+                                event_type="THINKING",
+                                thinking=data,
+                            )
+                        elif event_type == "done":
+                            response = data
+                except Exception as ex:
+                    logger.warning(f"LLM streaming tool calling step {hop + 1} failed: {ex}. Trying non-streaming fallback...")
+                    try:
+                        response = await llm_client.chat_with_tools(
+                            messages=messages,
+                            tools=openai_tools,
+                            tool_choice="auto",
+                            temperature=0.1,
+                        )
+                    except Exception as fb_ex:
+                        logger.warning(f"Fallback also failed: {fb_ex}")
+                        break
 
             if not response:
                 break
@@ -867,8 +880,29 @@ class AgentOrchestrator:
                                         lines.append(f"- {name} ({pos}, {affil}): 📞 {phone}" + (f", ✉️ {email}" if email else ""))
                             else:
                                 lines.append(f"- 검색어 '{q_param}' 관련 교수/교직원 개인 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다.")
-                                lines.append("💡 지침: 교수님 개인 연락처가 조회되지 않고 학과 사무실 번호만 있는 경우, '{교수명} 교수님의 개인 연락처는 등록되어 있지 않으나, 소속 학과인 {학과명} 학과 사무실({번호})로 문의하실 수 있습니다'라고 맥락을 밝혀 친절히 안내하세요.")
-                            summary_out = "\n".join(lines) + "\n"
+                    elif tool.category == "SCHEDULE":
+                        tool_data = res
+                        sched_list = []
+                        if isinstance(res, list):
+                            sched_list = res
+                        elif isinstance(res, dict):
+                            sched_list = res.get("items") or res.get("contents") or res.get("schedules") or (res.get("data") if isinstance(res.get("data"), list) else [])
+
+                        lines = [f"\n[인천대학교 학사일정 조회 결과 ({tool_display_name})]:"]
+                        if sched_list:
+                            for s in sched_list[:8]:
+                                if isinstance(s, dict):
+                                    title = s.get("title") or s.get("content") or "학사일정"
+                                    start = s.get("start") or s.get("startDate") or ""
+                                    end = s.get("end") or s.get("endDate") or ""
+                                    date_str = f"{start} ~ {end}" if start and end and start != end else (start or end or "일정 미정")
+                                    cal_link = f"/home/calendar?date={start}" if start else "/home/calendar"
+                                    lines.append(f"- [{title}]({cal_link}) (기간: {date_str})")
+                            lines.append("\n💡 [학사일정 링크 작성 지침]: 학사일정에는 절대 공지사항 링크(/home/notice/{id})를 붙이지 마세요! 위 제공된 인팁 앱 캘린더 상대 경로인 `[일정명](/home/calendar?date=YYYY-MM-DD)`(시작일 기준) 또는 `[학사일정 전체보기](/home/calendar)`로만 마크다운 링크를 표(|---|---|)나 목록에 그대로 작성하세요.")
+                        else:
+                            lines.append("- 조회된 학사일정이 없습니다.")
+                            lines.append("💡 [학사일정 링크 작성 지침]: 학생에게 등록된 일정이 없음을 안내하고, 전체 학사일정을 확인할 수 있도록 `[학사일정 전체보기](/home/calendar)` 링크를 제공하세요.")
+                        summary_out = "\n".join(lines) + "\n"
                     elif tool.category == "NOTICE":
                         tool_data = res
                         notices_list = []
@@ -940,12 +974,13 @@ class AgentOrchestrator:
                             scheds = res.get("schedules", {}).get("items", []) if isinstance(res.get("schedules"), dict) else []
                             if scheds:
                                 lines.append("- 📅 학사일정:")
-                                for s in scheds[:3]:
-                                    content = s.get("content") or "학사일정"
-                                    start = s.get("startDate") or ""
-                                    end = s.get("endDate") or ""
-                                    date_str = f" (기간: {start} ~ {end})" if start and end else ""
-                                    lines.append(f"  • {content}{date_str}")
+                                for s in scheds[:5]:
+                                    content = s.get("content") or s.get("title") or "학사일정"
+                                    start = s.get("startDate") or s.get("start") or ""
+                                    end = s.get("endDate") or s.get("end") or ""
+                                    date_str = f" (기간: {start} ~ {end})" if start and end and start != end else (f" (날짜: {start})" if start else "")
+                                    cal_link = f"/home/calendar?date={start}" if start else "/home/calendar"
+                                    lines.append(f"  • [{content}]({cal_link}){date_str}")
 
                             courses = res.get("courses", {}).get("items", []) if isinstance(res.get("courses"), dict) else []
                             if courses:

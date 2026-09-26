@@ -290,8 +290,10 @@ class LLMClient:
                                 except Exception:
                                     continue
 
-                            # Finalize native parsed tool calls
+                            # Tool calls for engine execution (parsed dict arguments)
                             parsed_tool_calls = []
+                            # Tool calls for raw_message conversation history (string arguments)
+                            serializable_tool_calls = []
                             for idx in sorted(tool_calls_map.keys()):
                                 tc_item = tool_calls_map[idx]
                                 raw_args = tc_item["function"]["arguments"]
@@ -299,8 +301,24 @@ class LLMClient:
                                     parsed_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                                 except Exception:
                                     parsed_args = {"query": raw_args}
-                                tc_item["function"]["arguments"] = parsed_args
-                                parsed_tool_calls.append(tc_item)
+                                parsed_tc = {
+                                    "id": tc_item.get("id"),
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc_item["function"]["name"],
+                                        "arguments": parsed_args,
+                                    }
+                                }
+                                serializable_tc = {
+                                    "id": tc_item.get("id"),
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc_item["function"]["name"],
+                                        "arguments": raw_args if isinstance(raw_args, str) else json.dumps(raw_args, ensure_ascii=False),
+                                    }
+                                }
+                                parsed_tool_calls.append(parsed_tc)
+                                serializable_tool_calls.append(serializable_tc)
 
                             yield ("done", {
                                 "content": accumulated_content,
@@ -308,8 +326,8 @@ class LLMClient:
                                 "tool_calls": parsed_tool_calls,
                                 "raw_message": {
                                     "role": "assistant",
-                                    "content": accumulated_content,
-                                    "tool_calls": parsed_tool_calls,
+                                    "content": accumulated_content or None,
+                                    "tool_calls": serializable_tool_calls or None,
                                 },
                             })
                             return
@@ -441,14 +459,27 @@ class LLMClient:
         raw_content = accumulated_text.strip()
         thought, tool_calls = self._parse_json_react_content(raw_content)
 
+        serializable_tool_calls = []
+        for tc in tool_calls:
+            fn = tc.get("function", {})
+            fn_args = fn.get("arguments", {})
+            serializable_tool_calls.append({
+                "id": tc.get("id", ""),
+                "type": "function",
+                "function": {
+                    "name": fn.get("name", ""),
+                    "arguments": json.dumps(fn_args, ensure_ascii=False) if isinstance(fn_args, dict) else str(fn_args),
+                }
+            })
+
         yield ("done", {
             "content": raw_content if not tool_calls else "",
             "thought": thought,
             "tool_calls": tool_calls,
             "raw_message": {
                 "role": "assistant",
-                "content": raw_content if not tool_calls else "",
-                "tool_calls": tool_calls,
+                "content": raw_content if not tool_calls else None,
+                "tool_calls": serializable_tool_calls if serializable_tool_calls else None,
             },
         })
 
