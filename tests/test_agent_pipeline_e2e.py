@@ -217,6 +217,7 @@ async def test_e2e_timetable_dispatched_with_fallback_card():
         message="포털에서 내 수강신청 내역 조회해줘",
         history=[],
         client_context={
+            "isApp": True,
             "portal": {"linked": True},
         },
     )
@@ -264,6 +265,70 @@ async def test_e2e_timetable_dispatched_with_fallback_card():
         assert len(cards) >= 1
         assert cards[0].title == "🗓️ 나의 수업 시간표"
         assert "DONE" in event_types
+
+
+@pytest.mark.asyncio
+async def test_e2e_timetable_web_environment_synthesis():
+    """Verify that in web environments (isApp=False), the stream never pauses with empty response; it synthesizes tokens and card seamlessly."""
+    await tool_registry.initialize_all_tools()
+    orchestrator = AgentOrchestrator()
+    request = ChatRequest(
+        message="이번학기 수강신청내역",
+        history=[],
+        client_context={
+            "isApp": False,
+            "portal": {"linked": True},
+        },
+    )
+
+    responses = [
+        # Hop 1: Call Portal Timetable Tool
+        {
+            "thought": "사용자의 이번 학기 수강신청 내역을 조회하기 위해 action_portal_get_student_timetable 도구를 호출합니다.",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_tt_web_1",
+                    "type": "function",
+                    "function": {
+                        "name": "action_portal_get_student_timetable",
+                        "arguments": {},
+                    },
+                }
+            ],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 2: Synthesis
+        {
+            "thought": "세션에 동기화된 데이터가 없으므로 대안과 함께 최종 답변을 작성합니다.",
+            "content": "완료",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": "완료"},
+        },
+    ]
+
+    async def mock_stream_chat(messages):
+        yield "현재 인팁에 동기화된 이번 학기 수강신청 시간표가 등록되어 있지 않습니다. "
+        yield "인팁 앱의 [시간표] 탭에서 이번 학기 시간표를 추가하거나 관리해보세요."
+
+    with patch("app.orchestrator.engine.llm_client.chat_with_tools", side_effect=responses), \
+         patch("app.orchestrator.engine.llm_client.stream_chat", side_effect=mock_stream_chat):
+
+        events = []
+        async for ev in orchestrator.run_stream(request):
+            events.append(ev)
+
+        event_types = [e.event_type for e in events]
+        # In web environment, ACTION_REQUIRED is not dispatched and stream does NOT stop early!
+        assert "ACTION_REQUIRED" not in event_types
+        assert "CARD" in event_types
+        assert "TOKEN" in event_types
+        assert "DONE" in event_types
+
+        tokens = [e.content for e in events if e.event_type == "TOKEN"]
+        assert len(tokens) >= 2
+        full_text = "".join(tokens)
+        assert "수강신청 시간표가 등록되어 있지 않습니다" in full_text
 
 
 @pytest.mark.asyncio

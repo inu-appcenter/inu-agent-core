@@ -117,6 +117,7 @@ class AgentOrchestrator:
                     existing_cats.add(cat)
 
         client_ctx = request.client_context or {}
+        is_app = bool(client_ctx.get("isApp", False))
         raw_token = client_ctx.get("auth") or client_ctx.get("authorization", "")
         clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
 
@@ -487,8 +488,8 @@ class AgentOrchestrator:
                 yield AgentStreamEvent(event_type="DONE")
                 return
 
-        # Case 2: On-Demand P2P Action Dispatched -> Complete first stream and await Client Callback
-        if emitted_actions:
+        # Case 2: On-Demand P2P Action Dispatched -> Complete first stream and await Client Callback (Native App only)
+        if is_app and emitted_actions:
             first_action_cat = list(emitted_actions)[0]
             logger.info(
                 f"[WAITING_FOR_ACTION_CALLBACK] query='{request.message[:40]}' "
@@ -621,6 +622,7 @@ class AgentOrchestrator:
             )
 
             client_ctx = request.client_context or {}
+            is_app = bool(client_ctx.get("isApp", False))
             portal_meta = client_ctx.get("portal") if isinstance(client_ctx.get("portal"), dict) else {}
             is_portal_linked = portal_meta.get("linked") is True
 
@@ -743,32 +745,113 @@ class AgentOrchestrator:
             else:
                 has_dispatched_action = False
                 action_category = "TIMETABLE" if is_timetable_tool else tool.category
-                if action_category not in emitted_actions:
-                    try:
-                        action_instruction = await tool.execute({}, exec_context)
-                        if hasattr(action_instruction, "action_id"):
-                            if getattr(request, "session_id", None):
-                                action_instruction.session_id = request.session_id
-                            logger.info(
-                                f"[ACTION_DISPATCHED] action_id={action_instruction.action_id} domain={action_instruction.auth_domain} "
-                                f"target={action_instruction.request.url if action_instruction.request else 'none'} "
-                                f"session_id={action_instruction.session_id}"
-                            )
-                            yield (AgentStreamEvent(event_type="ACTION_REQUIRED", action=action_instruction), "", None, None)
-                            emitted_actions.add(action_category)
-                            has_dispatched_action = True
-                    except Exception as ex:
-                        logger.warning(f"Failed to generate client action for {tool.name}: {ex}")
 
-                # 1. On-demand dynamic Client Action dispatched to client (Coocon P2P scraping)
-                if has_dispatched_action:
+                # Case A-1: Mobile App Environment (ReactNativeWebView) -> Dispatch On-Demand P2P Scraping Action
+                if is_app:
+                    if action_category not in emitted_actions:
+                        try:
+                            action_instruction = await tool.execute({}, exec_context)
+                            if hasattr(action_instruction, "action_id"):
+                                if getattr(request, "session_id", None):
+                                    action_instruction.session_id = request.session_id
+                                logger.info(
+                                    f"[ACTION_DISPATCHED] action_id={action_instruction.action_id} domain={action_instruction.auth_domain} "
+                                    f"target={action_instruction.request.url if action_instruction.request else 'none'} "
+                                    f"session_id={action_instruction.session_id}"
+                                )
+                                yield (AgentStreamEvent(event_type="ACTION_REQUIRED", action=action_instruction), "", None, None)
+                                emitted_actions.add(action_category)
+                                has_dispatched_action = True
+                        except Exception as ex:
+                            logger.warning(f"Failed to generate client action for {tool.name}: {ex}")
+
+                    if has_dispatched_action:
+                        if is_timetable_tool:
+                            summary_out = (
+                                f"\n[TIMETABLE_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 전달했습니다. "
+                                "현재 세션에 사전 동기화된 이번 학기 수강신청/시간표 데이터가 없습니다. "
+                                "(⚠️ 최우선 핵심 지침: 임의의 과목명이나 강의실을 절대로 지어내지 마세요! "
+                                "또한 단일 대화 턴이므로 '잠시만 기다려 주세요' 또는 '불러오는 중입니다'라는 말로만 답변을 끝내지 마십시오. "
+                                "'현재 인팁에 동기화된 이번 학기 수강신청 시간표가 등록되어 있지 않습니다. 인팁 앱의 [시간표] 탭에서 시간표를 추가하거나 관리할 수 있습니다'라고 대안과 함께 친절하고 명확하게 안내하세요.)\n"
+                            )
+                            if "TIMETABLE" not in emitted_cards:
+                                fallback_card = CardSynthesizer.synthesize_for_domain(
+                                    domain="TIMETABLE",
+                                    tool_name=tool.name,
+                                    data=None,
+                                    query=request.message,
+                                )
+                                if fallback_card:
+                                    yield (AgentStreamEvent(event_type="CARD", card=fallback_card), "", None, None)
+                                    emitted_cards.add("TIMETABLE")
+                        else:
+                            summary_out = (
+                                f"\n[{tool.category}_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 하달했습니다. "
+                                "현재 단말기가 학교 종합정보시스템(ERP)과 직접 통신하여 최신 학적 내역을 확인하고 있습니다. "
+                                "(⚠️ 최우선 핵심 지침: 단말기 조회가 완료되기 전까지 시스템 조회 데이터에 정보가 없으므로, 임의의 정보를 절대로 지어내거나 추측하지 마세요! "
+                                "계정 연동 카드를 누르라고 안내하지 말고, '기기에서 학교 포털 종합정보시스템(ERP)에 접속하여 최신 학적 정보를 안전하게 불러오는 중입니다'라고 정직하게 안내하세요.)\n"
+                            )
+                    elif tool.category == "PORTAL" and is_portal_linked:
+                        err_msg = portal_meta.get("academicErrorMessage") or "포털 또는 ERP 응답을 확인하지 못했습니다."
+                        target_domain = "TIMETABLE" if is_timetable_tool else "PORTAL"
+                        if target_domain not in emitted_cards:
+                            if is_timetable_tool:
+                                fetch_fail_card = CardSynthesizer.synthesize_for_domain(
+                                    domain="TIMETABLE",
+                                    tool_name=tool.name,
+                                    data=None,
+                                    query=request.message,
+                                )
+                            else:
+                                fetch_fail_card = CardSynthesizer.synthesize_for_domain(
+                                    domain="PORTAL",
+                                    tool_name=tool.name,
+                                    data={"status": "FETCH_FAILED", "message": err_msg},
+                                    query=request.message,
+                                )
+                            if fetch_fail_card:
+                                yield (AgentStreamEvent(event_type="CARD", card=fetch_fail_card), "", None, None)
+                                emitted_cards.add(target_domain)
+                                emitted_cards.add(tool.category)
+
+                        summary_out = (
+                            f"\n[PORTAL_STATUS]: 학생의 포털 계정은 정상 연동되어 있으나, 학교 ERP(종합정보시스템) 응답 지연으로 학적 정보를 일시적으로 불러오지 못했습니다. ({err_msg}) "
+                            "학생에게 계정 연동은 잘 유지되어 있으니 잠시 후 같은 질문을 다시 보내달라고 친절하게 안내하세요. (⚠️ 중요 지침: 계정 연동 카드를 다시 누르라고 절대 안내하지 마세요!)\n"
+                        )
+                    else:
+                        if tool.category not in emitted_cards:
+                            auth_card = CardSynthesizer.synthesize_for_domain(
+                                domain=tool.category,
+                                tool_name=tool.name,
+                                data="AUTH_REQUIRED",
+                                query=request.message,
+                            )
+                            if auth_card:
+                                yield (AgentStreamEvent(event_type="CARD", card=auth_card), "", None, None)
+                                emitted_cards.add(tool.category)
+
+                        if tool.category == "PORTAL":
+                            summary_out = (
+                                "\n[PORTAL_STATUS]: 현재 세션에는 연동된 학생의 실제 학적 데이터가 없습니다. "
+                                "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 즉시 조회가 가능함을 학생에게 친절히 안내하세요. "
+                                "(⚠️ 중요 지침: 앱의 '설정'이나 '마이페이지' 등 다른 메뉴로 이동하라고 안내하지 마세요! "
+                                "오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
+                            )
+                        else:
+                            summary_out = (
+                                "\n[LMS_STATUS]: 현재 세션에는 연동된 학생의 실제 이러닝(LMS) 데이터가 없습니다. "
+                                "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 이러닝 과제와 학적 조회가 즉시 가능함을 학생에게 친절히 안내하세요. "
+                                "(⚠️ 중요 지침: 인천대학교 포털, 이러닝(LMS), 도서관은 모두 동일한 포털 계정(학번/비밀번호)을 사용하므로 1회 등록 시 모두 함께 연동됩니다. "
+                                "앱의 '설정'이나 '마이페이지' 등 다른 메뉴를 안내하지 말고, 오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
+                            )
+
+                # Case A-2: Web Environment (is_app is False) -> No Native Bridge, Seamless Card & Synthesis
+                else:
                     if is_timetable_tool:
                         summary_out = (
-                            f"\n[TIMETABLE_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 전달했습니다. "
-                            "현재 세션에 사전 동기화된 이번 학기 수강신청/시간표 데이터가 없습니다. "
+                            f"\n[TIMETABLE_STATUS]: 현재 세션에는 동기화된 이번 학기 수강신청/시간표 데이터가 없습니다. (등록된 수업 없음) "
                             "(⚠️ 최우선 핵심 지침: 임의의 과목명이나 강의실을 절대로 지어내지 마세요! "
-                            "또한 단일 대화 턴이므로 '잠시만 기다려 주세요' 또는 '불러오는 중입니다'라는 말로만 답변을 끝내지 마십시오. "
-                            "'현재 인팁에 동기화된 이번 학기 수강신청 시간표가 등록되어 있지 않습니다. 인팁 앱의 [시간표] 탭에서 시간표를 추가하거나 관리할 수 있습니다'라고 대안과 함께 친절하고 명확하게 안내하세요.)\n"
+                            "사용자에게 '현재 인팁에 동기화된 이번 학기 수강신청 시간표가 등록되어 있지 않습니다. 인팁 앱의 [시간표] 탭에서 시간표를 추가하거나 관리할 수 있으며, 또는 포털 종합정보시스템의 수강신청 내역에서 확인하실 수 있습니다'라고 대안과 함께 친절하고 명확하게 안내하세요.)\n"
                         )
                         if "TIMETABLE" not in emitted_cards:
                             fallback_card = CardSynthesizer.synthesize_for_domain(
@@ -780,75 +863,64 @@ class AgentOrchestrator:
                             if fallback_card:
                                 yield (AgentStreamEvent(event_type="CARD", card=fallback_card), "", None, None)
                                 emitted_cards.add("TIMETABLE")
-                    else:
-                        summary_out = (
-                            f"\n[{tool.category}_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 하달했습니다. "
-                            "현재 단말기가 학교 종합정보시스템(ERP)과 직접 통신하여 최신 학적 내역을 확인하고 있습니다. "
-                            "(⚠️ 최우선 핵심 지침: 단말기 조회가 완료되기 전까지 시스템 조회 데이터에 정보가 없으므로, 임의의 정보를 절대로 지어내거나 추측하지 마세요! "
-                            "계정 연동 카드를 누르라고 안내하지 말고, '기기에서 학교 포털 종합정보시스템(ERP)에 접속하여 최신 학적 정보를 안전하게 불러오는 중입니다'라고 정직하게 안내하세요.)\n"
-                        )
-                # 2. Portal account linked but ERP response timed out or failed
-                elif tool.category == "PORTAL" and is_portal_linked:
-                    err_msg = portal_meta.get("academicErrorMessage") or "포털 또는 ERP 응답을 확인하지 못했습니다."
-                    target_domain = "TIMETABLE" if is_timetable_tool else "PORTAL"
-                    if target_domain not in emitted_cards:
-                        if is_timetable_tool:
-                            fetch_fail_card = CardSynthesizer.synthesize_for_domain(
-                                domain="TIMETABLE",
-                                tool_name=tool.name,
-                                data=None,
-                                query=request.message,
-                            )
-                        else:
+                    elif tool.category == "PORTAL" and is_portal_linked:
+                        err_msg = portal_meta.get("academicErrorMessage") or "현재 세션에 동기화된 학적 정보가 없습니다."
+                        target_domain = "PORTAL"
+                        if target_domain not in emitted_cards:
                             fetch_fail_card = CardSynthesizer.synthesize_for_domain(
                                 domain="PORTAL",
                                 tool_name=tool.name,
                                 data={"status": "FETCH_FAILED", "message": err_msg},
                                 query=request.message,
                             )
-                        if fetch_fail_card:
-                            yield (AgentStreamEvent(event_type="CARD", card=fetch_fail_card), "", None, None)
-                            emitted_cards.add(target_domain)
-                            emitted_cards.add(tool.category)
+                            if fetch_fail_card:
+                                yield (AgentStreamEvent(event_type="CARD", card=fetch_fail_card), "", None, None)
+                                emitted_cards.add(target_domain)
+                                emitted_cards.add(tool.category)
 
-                    summary_out = (
-                        f"\n[PORTAL_STATUS]: 학생의 포털 계정은 정상 연동되어 있으나, 학교 ERP(종합정보시스템) 응답 지연으로 학적 정보를 일시적으로 불러오지 못했습니다. ({err_msg}) "
-                        "학생에게 계정 연동은 잘 유지되어 있으니 잠시 후 같은 질문을 다시 보내달라고 친절하게 안내하세요. (⚠️ 중요 지침: 계정 연동 카드를 다시 누르라고 절대 안내하지 마세요!)\n"
-                    )
-                # 3. Portal or LMS genuinely unlinked
-                else:
-                    if tool.category not in emitted_cards:
-                        auth_card = CardSynthesizer.synthesize_for_domain(
-                            domain=tool.category,
-                            tool_name=tool.name,
-                            data="AUTH_REQUIRED",
-                            query=request.message,
-                        )
-                        if auth_card:
-                            yield (AgentStreamEvent(event_type="CARD", card=auth_card), "", None, None)
-                            emitted_cards.add(tool.category)
-
-                    if tool.category == "PORTAL":
                         summary_out = (
-                            "\n[PORTAL_STATUS]: 현재 세션에는 연동된 학생의 실제 학적 데이터가 없습니다. "
-                            "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 즉시 조회가 가능함을 학생에게 친절히 안내하세요. "
-                            "(⚠️ 중요 지침: 앱의 '설정'이나 '마이페이지' 등 다른 메뉴로 이동하라고 안내하지 마세요! "
-                            "오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
+                            f"\n[PORTAL_STATUS]: 학생의 포털 계정은 정상 연동되어 있으나, 현재 세션에 동기화된 학적 정보를 불러오지 못했습니다. ({err_msg}) "
+                            "학생에게 계정 연동은 잘 유지되어 있으니 잠시 후 같은 질문을 다시 시도해 주시거나 인팁 모바일 앱에서 확인해 달라고 친절하게 안내하세요. (⚠️ 중요 지침: 계정 연동 카드를 다시 누르라고 절대 안내하지 마세요!)\n"
                         )
                     else:
-                        summary_out = (
-                            "\n[LMS_STATUS]: 현재 세션에는 연동된 학생의 실제 이러닝(LMS) 데이터가 없습니다. "
-                            "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 이러닝 과제와 학적 조회가 즉시 가능함을 학생에게 친절히 안내하세요. "
-                            "(⚠️ 중요 지침: 인천대학교 포털, 이러닝(LMS), 도서관은 모두 동일한 포털 계정(학번/비밀번호)을 사용하므로 1회 등록 시 모두 함께 연동됩니다. "
-                            "앱의 '설정'이나 '마이페이지' 등 다른 메뉴를 안내하지 말고, 오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
-                        )
+                        if tool.category not in emitted_cards:
+                            auth_card = CardSynthesizer.synthesize_for_domain(
+                                domain=tool.category,
+                                tool_name=tool.name,
+                                data="AUTH_REQUIRED",
+                                query=request.message,
+                            )
+                            if auth_card:
+                                yield (AgentStreamEvent(event_type="CARD", card=auth_card), "", None, None)
+                                emitted_cards.add(tool.category)
+
+                        if tool.category == "PORTAL":
+                            summary_out = (
+                                "\n[PORTAL_STATUS]: 현재 세션에는 연동된 학생의 실제 학적 데이터가 없습니다. "
+                                "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 즉시 조회가 가능함을 학생에게 친절히 안내하세요. "
+                                "(⚠️ 중요 지침: 앱의 '설정'이나 '마이페이지' 등 다른 메뉴로 이동하라고 안내하지 마세요! "
+                                "오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
+                            )
+                        else:
+                            summary_out = (
+                                "\n[LMS_STATUS]: 현재 세션에는 연동된 학생의 실제 이러닝(LMS) 데이터가 없습니다. "
+                                "대화창에 표시된 [포털 계정 연동하기] 카드를 눌러 1회 연동을 완료하면 이러닝 과제와 학적 조회가 즉시 가능함을 학생에게 친절히 안내하세요. "
+                                "(⚠️ 중요 지침: 인천대학교 포털, 이러닝(LMS), 도서관은 모두 동일한 포털 계정(학번/비밀번호)을 사용하므로 1회 등록 시 모두 함께 연동됩니다. "
+                                "앱의 '설정'이나 '마이페이지' 등 다른 메뉴를 안내하지 말고, 오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
+                            )
 
             if has_dispatched_action:
                 status_state = "running"
                 status_title = f"{tool_display_name} 조회 중..."
-            elif domain_data:
+            elif domain_data or (not is_app and is_timetable_tool):
                 status_state = "completed"
                 status_title = f"{tool_display_name} 확인 완료"
+            elif not is_app and is_portal_linked:
+                status_state = "completed"
+                status_title = f"{tool_display_name} 확인 완료"
+            elif not is_app and not is_portal_linked:
+                status_state = "completed"
+                status_title = f"{tool_display_name} 연동 안내"
             else:
                 status_state = "failed"
                 status_title = f"{tool_display_name} 조회 실패"
