@@ -33,6 +33,27 @@ class CardSynthesizer:
         """
         domain = domain.upper()
 
+        # Handle MCP remote tools returning auth required components
+        if isinstance(data, dict):
+            ui_comp = data.get("uiComponent")
+            if isinstance(ui_comp, dict):
+                ui_type = ui_comp.get("type")
+                if ui_type == "AUTH_REQUIRED":
+                    link_obj = ui_comp.get("link") or {}
+                    return ComponentCard(
+                        type="AUTH_REQUIRED",
+                        title=ui_comp.get("title") or "로그인이 필요한 서비스예요",
+                        data=ui_comp.get("data") or {},
+                        link=CardLink(
+                            label=link_obj.get("label", "로그인하기"),
+                            route=link_obj.get("route", "/login"),
+                        ),
+                    )
+                elif ui_type == "PORTAL_AUTH_REQUIRED":
+                    return cls._build_portal_auth_card()
+                elif ui_type == "LMS_AUTH_REQUIRED":
+                    return cls._build_lms_auth_card()
+
         if domain == "BUS":
             return cls._build_bus_card(data)
         elif domain == "CAFETERIA":
@@ -73,6 +94,10 @@ class CardSynthesizer:
             return cls._build_settings_card(data)
         elif domain in ["SEARCH", "UNIFIED_SEARCH"] or "unifiedsearch" in tool_name.lower() or "search" in tool_name.lower():
             return cls._build_unified_search_card(data, query=query)
+        elif domain in ["CLUB", "API_CLUB_LIST"] or "club" in tool_name.lower():
+            return cls._build_club_card(data)
+        elif domain in ["LOST_PROPERTY", "API_LOST_PROPERTY"] or "lost" in tool_name.lower():
+            return cls._build_lost_property_card(data)
 
         return None
 
@@ -87,9 +112,10 @@ class CardSynthesizer:
         stop_name = "인천대입구역"
 
         if isinstance(data, dict):
-            arrivals = data.get("arrivals") or []
-            valid_routes = data.get("validRoutes") or []
-            stop_name = data.get("stopName") or data.get("tabName") or "버스 정류장"
+            bus_raw = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+            arrivals = data.get("arrivals") or bus_raw.get("arrivals") or []
+            valid_routes = data.get("validRoutes") or bus_raw.get("validRoutes") or []
+            stop_name = data.get("stopName") or data.get("tabName") or bus_raw.get("stopName") or bus_raw.get("tabName") or "버스 정류장"
         elif isinstance(data, list):
             arrivals = data
 
@@ -571,10 +597,13 @@ class CardSynthesizer:
     def _build_weather_card(cls, data: Optional[Any] = None) -> Optional[MetricCard]:
         if not data or not isinstance(data, dict):
             return None
-        temp = data.get("temp") or data.get("temperature") or "--°C"
-        sky = data.get("sky") or data.get("condition") or "맑음"
-        pm10 = data.get("pm10") or data.get("airQuality") or "보통"
-        rain = data.get("rain") or data.get("precipitation") or "0mm"
+        w_data = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+        temp = w_data.get("temp") or w_data.get("temperature") or "--°C"
+        if temp and not str(temp).endswith("°C") and str(temp) != "--°C":
+            temp = f"{temp}°C"
+        sky = w_data.get("sky") or w_data.get("condition") or "맑음"
+        pm10 = w_data.get("pm10Grade") or w_data.get("pm10") or w_data.get("airQuality") or "보통"
+        rain = w_data.get("rain") or w_data.get("precipitation") or "0mm"
 
         return MetricCard(
             title="⛅ 송도 캠퍼스 실시간 날씨",
@@ -588,6 +617,68 @@ class CardSynthesizer:
                 MetricCardItem(label="강수량", value=str(rain)),
             ],
             footer_text="기상청 실시간 송도 캠퍼스 관측 데이터 기반",
+        )
+
+    @classmethod
+    def _build_club_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+        if not data:
+            return None
+        c_raw = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+        items_list = c_raw.get("items") or data.get("items") or (data if isinstance(data, list) else [])
+        if not items_list:
+            return None
+        items = []
+        for cl in items_list[:5]:
+            if isinstance(cl, dict):
+                c_name = cl.get("name") or "동아리"
+                c_cat = cl.get("category") or "중앙동아리"
+                c_room = cl.get("room") or ""
+                sub = f"위치: {c_room}" if c_room else "인천대학교 중앙동아리"
+                items.append(
+                    ListItem(
+                        title=str(c_name),
+                        subtitle=sub,
+                        tag=str(c_cat)[:6],
+                        link="/home/club",
+                    )
+                )
+        if not items:
+            return None
+        return ListCard(
+            title="🎯 교내 동아리 목록",
+            items=items,
+            footer_text="동아리 가입 및 상세 활동 내역은 학생회관 동아리방을 방문해 보세요.",
+        )
+
+    @classmethod
+    def _build_lost_property_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+        if not data:
+            return None
+        lp_raw = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+        items_list = lp_raw.get("items") or data.get("items") or (data if isinstance(data, list) else [])
+        if not items_list:
+            return None
+        items = []
+        for lp in items_list[:5]:
+            if isinstance(lp, dict):
+                title = lp.get("title") or lp.get("name") or "습득물/분실물"
+                loc = lp.get("location") or lp.get("place") or ""
+                date = lp.get("date") or lp.get("createDate") or ""
+                sub = f"위치: {loc} | 날짜: {date}".strip(" |") if (loc or date) else "학내 분실물 안내"
+                items.append(
+                    ListItem(
+                        title=str(title),
+                        subtitle=sub,
+                        tag=str(lp.get("status", "보관중"))[:6],
+                        link="/home/lost-property",
+                    )
+                )
+        if not items:
+            return None
+        return ListCard(
+            title="📦 학내 분실물 및 습득물 목록",
+            items=items,
+            footer_text="분실물 수령 및 문의는 학생지원과 또는 해당 보관 장소를 방문하세요.",
         )
 
     @classmethod
@@ -620,7 +711,8 @@ class CardSynthesizer:
         # 2. 열람실 잔여 좌석 목록 컴포넌트 카드 (LIBRARY_ROOMS)
         raw_rooms = []
         if isinstance(data, dict):
-            raw_rooms = data.get("rooms") or data.get("list") or []
+            lib_raw = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+            raw_rooms = lib_raw.get("rooms") or lib_raw.get("list") or data.get("rooms") or []
         elif isinstance(data, list):
             raw_rooms = data
 

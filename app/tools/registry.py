@@ -38,13 +38,25 @@ class ToolRegistry:
         clean_name = name.replace("api_", "").replace("action_", "").replace("-", "_").lower()
         for t_name, t in self._tools.items():
             t_clean = t_name.replace("api_", "").replace("action_", "").replace("-", "_").lower()
-            if t_clean == clean_name:
+            if t_clean == clean_name or t.category.lower() == clean_name:
                 return t
 
-        # Contact / Directory alias mapping (api_searchContacts -> api_directory)
+        # Domain alias mappings
         if "contact" in clean_name or "directory" in clean_name:
             for t_name, t in self._tools.items():
                 if "directory" in t_name.lower():
+                    return t
+        elif "search" in clean_name:
+            for t_name, t in self._tools.items():
+                if "search" in t_name.lower():
+                    return t
+        elif "club" in clean_name:
+            for t_name, t in self._tools.items():
+                if "club" in t_name.lower():
+                    return t
+        elif "lost" in clean_name:
+            for t_name, t in self._tools.items():
+                if "lost" in t_name.lower():
                     return t
         return None
 

@@ -244,7 +244,11 @@ class AgentRouter:
         history_str = cls._format_history_str(history, max_turns=6)
 
         # Ensure core campus domain tools are always visible in candidate catalog
-        core_categories = {"PORTAL", "LIBRARY", "LMS", "BUS", "CAFETERIA", "TIMETABLE", "SCHEDULE", "NOTICE", "DIRECTORY", "WEATHER", "CAMPUS_WATCH", "INU_AI_KNOWLEDGE"}
+        core_categories = {
+            "PORTAL", "LIBRARY", "LMS", "BUS", "CAFETERIA", "TIMETABLE",
+            "SCHEDULE", "NOTICE", "DIRECTORY", "WEATHER", "CAMPUS_WATCH",
+            "INU_AI_KNOWLEDGE", "SEARCH", "CLUB", "LOST_PROPERTY"
+        }
         all_candidate_tools = list(candidate_tools)
         existing_cats = {t.category.upper() for t in all_candidate_tools}
         

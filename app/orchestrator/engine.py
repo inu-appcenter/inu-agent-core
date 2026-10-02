@@ -47,6 +47,9 @@ def resolve_tool_display_name(category: str, name: str) -> str:
         "KEYWORD": "공지사항 키워드 알림 구독",
         "SETTINGS": "내 맞춤 알림 및 브리프 설정 종합",
         "SEARCH": "인천대학교 전 도메인 고도화 통합 검색",
+        "CLUB": "교내 동아리 목록 정보",
+        "LOST_PROPERTY": "학내 분실물 습득/신고 정보",
+        "TIMETABLE_GAP": "시간표 공강 및 여유 시간 분석",
     }
     if category in category_map:
         return category_map[category]
@@ -837,8 +840,8 @@ class AgentOrchestrator:
                 None,
             )
 
-        # Case B: Server OpenAPI / Direct Tools
-        elif tool.category in ["CAFETERIA", "BUS", "TIMETABLE", "NOTICE", "SCHEDULE", "DIRECTORY", "WEATHER", "LIBRARY", "CAMPUS_WATCH", "REMINDER", "DAILY_BRIEF", "KEYWORD", "SETTINGS"]:
+        # Case B: Server OpenAPI / Direct Tools / MCP Tools
+        elif tool.category != "INU_AI_KNOWLEDGE":
             yield (
                 AgentStreamEvent(
                     event_type="STATUS",
@@ -884,7 +887,7 @@ class AgentOrchestrator:
             bus_meta = None
             if tool.category == "BUS":
                 from app.orchestrator.router import DynamicBusMatcher
-                user_stop = str(final_args.get("bstopId") or final_args.get("stop_name") or "").strip()
+                user_stop = str(final_args.get("bstopId") or final_args.get("stop_name") or final_args.get("stopName") or "").strip()
                 bstop_id, stop_name, tab_name, valid_routes = await DynamicBusMatcher.resolve_stop_and_routes(
                     request.message, user_stop if user_stop and not user_stop.isdigit() else None
                 )
@@ -911,15 +914,24 @@ class AgentOrchestrator:
                         f"'현재 교내 시스템 일시 오류로 실시간 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
                     )
                 elif res is not None:
-                    if tool.category == "BUS" and bus_meta:
-                        valid_routes = bus_meta.get("validRoutes", [])
-                        stop_name = bus_meta.get("stopName", "정류소")
-                        tab_name = bus_meta.get("tabName", "정류장")
-                        raw_list = res if isinstance(res, list) else res.get("items", [])
+                    if tool.category == "BUS":
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                        bus_raw = res.get("rawData") if (isinstance(res, dict) and isinstance(res.get("rawData"), dict)) else {}
+
+                        stop_name = (bus_meta.get("stopName") if bus_meta else None) or bus_raw.get("stopName") or "정류소"
+                        tab_name = (bus_meta.get("tabName") if bus_meta else None) or bus_raw.get("tabName") or "정류장"
+                        valid_routes = (bus_meta.get("validRoutes") if bus_meta else None) or bus_raw.get("validRoutes") or []
+
+                        raw_arrivals = []
+                        if isinstance(res, list):
+                            raw_arrivals = res
+                        elif isinstance(res, dict):
+                            raw_arrivals = bus_raw.get("arrivals") or res.get("arrivals") or res.get("items") or []
+
                         filtered_arrivals = [
-                            item for item in raw_list
-                            if isinstance(item, dict) and item.get("routeNo") in valid_routes
-                        ] if valid_routes else raw_list
+                            item for item in raw_arrivals
+                            if isinstance(item, dict) and (not valid_routes or item.get("routeNo") in valid_routes)
+                        ] if valid_routes else raw_arrivals
 
                         tool_data = {
                             "arrivals": filtered_arrivals,
@@ -928,12 +940,23 @@ class AgentOrchestrator:
                             "tabName": tab_name,
                         }
                         if filtered_arrivals:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
                             summary_out = (
                                 f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n"
                                 f"- 모니터링 노선: {', '.join(valid_routes)}\n"
                                 f"- 실시간 도착 정보:\n{json.dumps(filtered_arrivals, ensure_ascii=False)}\n"
                             )
+                        elif mcp_summary:
+                            if "없습니다" in mcp_summary or "운행 대기" in mcp_summary:
+                                status_state = "empty"
+                                status_title = f"{tool_display_name} 결과 없음"
+                            else:
+                                status_state = "completed"
+                                status_title = f"{tool_display_name} 확인 완료"
+                            summary_out = f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n{mcp_summary}\n"
                         else:
+                            status_state = "empty"
                             status_title = f"{tool_display_name} 결과 없음"
                             summary_out = (
                                 f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n"
@@ -1019,14 +1042,16 @@ class AgentOrchestrator:
                             )
                     elif tool.category == "LIBRARY" and isinstance(res, dict):
                         tool_data = res
-                        mode = res.get("mode")
+                        lib_raw = res.get("rawData") if isinstance(res.get("rawData"), dict) else (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else res)
+                        mcp_summary = (res.get("summary") or "").strip()
+                        mode = lib_raw.get("mode") or res.get("mode")
                         if mode == "STUDY_ROOMS":
-                            study_rooms = res.get("rooms") or res.get("data", {}).get("rooms", [])
+                            study_rooms = lib_raw.get("rooms") or lib_raw.get("data", {}).get("rooms", []) or res.get("rooms", [])
                             rooms_info = "\n".join([
                                 f"- {r.get('name')}: 위치 {r.get('location')}, 수용정원 {r.get('quota')}, 구비시설 ({', '.join(r.get('tags', []))})"
-                                for r in study_rooms
+                                for r in study_rooms if isinstance(r, dict)
                             ])
-                            notice = res.get("data", {}).get("notice") or res.get("notice", "")
+                            notice = lib_raw.get("notice") or res.get("notice", "")
                             summary_out = (
                                 f"\n[학산도서관 스터디룸 목록 및 예약 안내]:\n"
                                 f"{rooms_info}\n"
@@ -1036,20 +1061,27 @@ class AgentOrchestrator:
                         elif mode in ["RESERVE_SEAT", "RESERVE_STUDY_ROOM"]:
                             summary_out = (
                                 f"\n[학산도서관 대화형 신청 카드 발급 완료]:\n"
-                                f"{res.get('instruction', '')}\n"
+                                f"{lib_raw.get('instruction') or res.get('instruction', '')}\n"
                             )
                         else:
-                            rooms = res.get("rooms", [])
-                            rooms_info = "\n".join([
-                                f"- {r.get('name', '')}: 잔여 {r.get('available_seats', r.get('seats', {}).get('available', 0))}석 / 전체 {r.get('total_seats', r.get('seats', {}).get('total', 0))}석"
-                                for r in rooms
-                            ])
-                            summary_out = (
-                                f"\n[학산도서관 열람실 실시간 잔여 좌석 현황 (공식 pyxis 시스템 실시간 관측 데이터)]:\n"
-                                f"{rooms_info}\n"
-                                f"⚠️ 지침: 반드시 위 실제 실시간 잔여 좌석 수치 그대로 학생에게 안내하세요 (임의의 숫자를 지어내지 마세요). "
-                                f"대화창 아래 제공된 실시간 열람실 카드에서 원하는 열람실을 터치하면 좌석 배정 화면으로 이동할 수 있음을 덧붙이세요.\n"
-                            )
+                            rooms = lib_raw.get("rooms") or res.get("rooms", [])
+                            if rooms:
+                                rooms_info = "\n".join([
+                                    f"- {r.get('name', '')}: 잔여 {r.get('available_seats', r.get('seats', {}).get('available', 0))}석 / 전체 {r.get('total_seats', r.get('seats', {}).get('total', 0))}석"
+                                    for r in rooms if isinstance(r, dict)
+                                ])
+                                summary_out = (
+                                    f"\n[학산도서관 열람실 실시간 잔여 좌석 현황 (공식 pyxis 시스템 실시간 관측 데이터)]:\n"
+                                    f"{rooms_info}\n"
+                                    f"⚠️ 지침: 반드시 위 실제 실시간 잔여 좌석 수치 그대로 학생에게 안내하세요 (임의의 숫자를 지어내지 마세요). "
+                                    f"대화창 아래 제공된 실시간 열람실 카드에서 원하는 열람실을 터치하면 좌석 배정 화면으로 이동할 수 있음을 덧붙이세요.\n"
+                                )
+                            elif mcp_summary:
+                                summary_out = f"\n[학산도서관 실시간 좌석 현황]:\n{mcp_summary}\n"
+                            else:
+                                status_state = "empty"
+                                status_title = f"{tool_display_name} 결과 없음"
+                                summary_out = "\n[학산도서관]: 현재 조회 가능한 좌석 정보가 없습니다.\n"
                     elif tool.category == "CAMPUS_WATCH" and isinstance(res, dict):
                         tool_data = res
                         summary_out = f"\n[학산도서관 실시간 빈자리 알림/스나이퍼 감시 결과]:\n{res.get('summary', '')}\n"
@@ -1325,22 +1357,127 @@ class AgentOrchestrator:
                                 for p in posts[:3]:
                                     lines.append(f"  • {p.get('title')} ({p.get('board')}, 추천: {p.get('likeCount')})")
 
-                            if total_cnt == 0:
+                            mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                            if "오류가 발생했습니다" in mcp_summary:
+                                status_state = "failed"
+                                status_title = f"{tool_display_name} 조회 실패"
+                                summary_out = (
+                                    f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 서버 응답 오류가 발생했습니다.\n"
+                                    f"⚠️ 핵심 응답 지침: 절대로 가상 정보를 지어내지 말고, '현재 교내 시스템 일시 오류로 통합 검색 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
+                                )
+                            elif total_cnt == 0:
                                 status_state = "empty"
                                 status_title = f"{tool_display_name} 결과 없음"
                                 lines.append("- 검색 결과가 0건입니다.")
                                 lines.append("💡 [자율 재검색 지침]: 결과가 0건이므로, 질문에서 불필요한 수식어를 덜어내거나 상위어/동의어로 검색어를 완화하여 1회 재검색(Query Expansion)할 수 있습니다. 이미 재검색했거나 마땅한 키워드가 없으면 검색 결과가 없음을 친절히 안내하세요.")
+                                summary_out = "\n".join(lines) + "\n"
                             else:
                                 status_state = "completed"
                                 status_title = f"{tool_display_name} 확인 완료"
                                 lines.append("💡 [중요 지침]: 검색 결과가 충분히 확보되었습니다. 추가 도구 호출을 즉시 중단하고, 위 공지 제목과 제공된 링크(학교공지는 INTIP 내부 상세 경로인 /home/notice/{공지ID})를 표나 목록에 마크다운 링크([공지제목](링크)) 형태로 그대로 포함하여 최종 답변을 작성하세요. 단순 텍스트로만 제목을 적지 마십시오.")
-
-                            summary_out = "\n".join(lines) + "\n"
+                                summary_out = "\n".join(lines) + "\n"
                         else:
                             summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
+                    elif tool.category == "WEATHER":
+                        tool_data = res
+                        w_raw = res.get("rawData") if (isinstance(res, dict) and isinstance(res.get("rawData"), dict)) else (res if isinstance(res, dict) else {})
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                        if "오류가 발생했습니다" in mcp_summary or (not w_raw and not mcp_summary):
+                            status_state = "failed"
+                            status_title = f"{tool_display_name} 조회 실패"
+                            summary_out = f"\n[날씨 실시간 조회 실패]: 현재 기상청/교내 날씨 서버와 통신할 수 없습니다.\n"
+                        else:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
+                            temp = w_raw.get("temperature") or w_raw.get("temp")
+                            sky = w_raw.get("sky") or w_raw.get("weather") or ""
+                            pm10 = w_raw.get("pm10Grade") or w_raw.get("pm10") or ""
+                            pm25 = w_raw.get("pm25Grade") or w_raw.get("pm25") or ""
+                            lines = ["\n[송도 캠퍼스 실시간 날씨 및 대기 정보]:"]
+                            if mcp_summary:
+                                lines.append(mcp_summary)
+                            else:
+                                if temp is not None:
+                                    lines.append(f"- 현재 기온: {temp}°C")
+                                if sky:
+                                    lines.append(f"- 하늘 상태: {sky}")
+                                if pm10:
+                                    lines.append(f"- 미세먼지: {pm10}")
+                                if pm25:
+                                    lines.append(f"- 초미세먼지: {pm25}")
+                            lines.append("💡 지침: 송도 캠퍼스 실시간 기온과 날씨, 미세먼지 정보를 학생에게 친절히 안내하세요.")
+                            summary_out = "\n".join(lines) + "\n"
+                    elif tool.category == "CLUB":
+                        tool_data = res
+                        c_raw = res.get("rawData") if (isinstance(res, dict) and isinstance(res.get("rawData"), dict)) else (res if isinstance(res, dict) else {})
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                        items_list = c_raw.get("items") or res.get("items") or []
+                        total_cnt = c_raw.get("totalCount", len(items_list)) if isinstance(c_raw, dict) else len(items_list)
+                        if "오류" in mcp_summary:
+                            status_state = "failed"
+                            status_title = f"{tool_display_name} 조회 실패"
+                            summary_out = f"\n[동아리 목록 조회 실패]: 동아리 정보를 불러오는 중 오류가 발생했습니다.\n"
+                        elif total_cnt == 0 or (not items_list and "조회된 정보가 없습니다" in mcp_summary):
+                            status_state = "empty"
+                            status_title = f"{tool_display_name} 결과 없음"
+                            summary_out = f"\n[교내 동아리 목록]: 현재 등록된 동아리 정보가 없습니다.\n"
+                        else:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
+                            summary_out = f"\n[교내 동아리 목록 조회 결과 ({total_cnt}건)]:\n{mcp_summary or json.dumps(items_list[:5], ensure_ascii=False)}\n"
+                    elif tool.category == "LOST_PROPERTY":
+                        tool_data = res
+                        lp_raw = res.get("rawData") if (isinstance(res, dict) and isinstance(res.get("rawData"), dict)) else (res if isinstance(res, dict) else {})
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                        items_list = lp_raw.get("items") or res.get("items") or []
+                        if "오류" in mcp_summary:
+                            status_state = "failed"
+                            status_title = f"{tool_display_name} 조회 실패"
+                            summary_out = f"\n[분실물 조회 실패]: 학내 분실물 목록 조회 중 일시적인 시스템 오류가 발생했습니다.\n"
+                        elif not items_list and ("없습니다" in mcp_summary or "0건" in mcp_summary or not lp_raw):
+                            status_state = "empty"
+                            status_title = f"{tool_display_name} 결과 없음"
+                            summary_out = f"\n[학내 분실물 목록]: 현재 등록된 분실물/습득물 내역이 없습니다.\n"
+                        else:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
+                            summary_out = f"\n[학내 분실물/습득물 조회 결과]:\n{mcp_summary or json.dumps(items_list[:5], ensure_ascii=False)}\n"
+                    elif tool.category == "TIMETABLE_GAP":
+                        tool_data = res
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                        ui_comp = res.get("uiComponent") if isinstance(res, dict) else None
+                        ui_type = ui_comp.get("type") if isinstance(ui_comp, dict) else None
+                        if "오류" in mcp_summary:
+                            status_state = "failed"
+                            status_title = f"{tool_display_name} 조회 실패"
+                            summary_out = f"\n[공강 시간 분석 오류]: {mcp_summary}\n"
+                        elif ui_type == "AUTH_REQUIRED" or "로그인" in mcp_summary:
+                            status_state = "empty"
+                            status_title = f"{tool_display_name} 결과 없음"
+                            summary_out = (
+                                f"\n[공강 시간 분석 안내]:\n{mcp_summary}\n"
+                                f"💡 지침: 공강 시간을 분석하려면 인팁(INTIP) 시간표가 필요함을 안내하세요.\n"
+                            )
+                        else:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
+                            summary_out = f"\n[공강 시간 분석 결과]:\n{mcp_summary}\n"
                     else:
                         tool_data = res
-                        summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                        if mcp_summary:
+                            if "오류" in mcp_summary or "실패" in mcp_summary:
+                                status_state = "failed"
+                                status_title = f"{tool_display_name} 조회 실패"
+                            elif any(k in mcp_summary for k in ["결과가 없습니다", "조회 결과가 없습니다", "등록된 정보가 없습니다", "내역이 없습니다", "0건"]):
+                                status_state = "empty"
+                                status_title = f"{tool_display_name} 결과 없음"
+                            else:
+                                status_state = "completed"
+                                status_title = f"{tool_display_name} 확인 완료"
+                            summary_out = f"\n[{tool_display_name} 조회 결과 ({tool.name})]:\n{mcp_summary}\n"
+                        else:
+                            summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
             except Exception as ex:
                 logger.warning(f"Error executing tool {tool.name}: {ex}")
                 status_state = "failed"

@@ -66,7 +66,7 @@ class McpRemoteTool(BaseTool):
 
         logger.info(f"Executing McpRemoteTool [{self.name}] on {self.mcp_url} (Auth: {bool(clean_token)})")
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 resp = await client.post(self.mcp_url, json=payload, headers=headers)
                 if resp.status_code >= 400:
@@ -122,7 +122,7 @@ class McpConnector:
         }
         logger.info(f"Connecting to remote MCP server at {self.mcp_url}...")
 
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 resp = await client.post(self.mcp_url, json=payload)
                 if resp.status_code != 200:
@@ -141,7 +141,9 @@ class McpConnector:
 
                     # Infer category accurately based on tool name and domain
                     name_lower = name.lower()
-                    if "timetable" in name_lower:
+                    if "timetable_gap" in name_lower:
+                        cat = "TIMETABLE_GAP"
+                    elif "timetable" in name_lower:
                         cat = "TIMETABLE"
                     elif "cafeteria" in name_lower or "menu" in name_lower:
                         cat = "CAFETERIA"
@@ -149,12 +151,26 @@ class McpConnector:
                         cat = "BUS"
                     elif "library" in name_lower or "seat" in name_lower:
                         cat = "LIBRARY"
+                    elif "campus_watch" in name_lower:
+                        cat = "CAMPUS_WATCH"
+                    elif "keyword" in name_lower:
+                        cat = "KEYWORD"
+                    elif "reminder" in name_lower:
+                        cat = "REMINDER"
+                    elif "daily_brief" in name_lower or "brief" in name_lower:
+                        cat = "DAILY_BRIEF"
+                    elif "settings" in name_lower or "chat_push" in name_lower:
+                        cat = "SETTINGS"
                     elif "notice" in name_lower:
                         cat = "NOTICE"
                     elif "schedule" in name_lower or "calendar" in name_lower:
                         cat = "SCHEDULE"
                     elif "directory" in name_lower or "contact" in name_lower:
                         cat = "DIRECTORY"
+                    elif "club" in name_lower:
+                        cat = "CLUB"
+                    elif "lost_property" in name_lower or "lost" in name_lower:
+                        cat = "LOST_PROPERTY"
                     elif "search" in name_lower:
                         cat = "SEARCH"
                     elif "weather" in name_lower:
