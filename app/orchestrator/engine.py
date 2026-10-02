@@ -282,7 +282,7 @@ class AgentOrchestrator:
                         }]
                     else:
                         break
-                elif ("DIRECTORY" in executed_categories or "api_directory" in executed_tool_names) and empty_directory_queries and "SEARCH" not in executed_categories and not any("search" in n.lower() for n in executed_tool_names):
+                elif ("DIRECTORY" in executed_categories or "api_directory" in executed_tool_names or any("directory" in n.lower() or "contact" in n.lower() for n in executed_tool_names)) and empty_directory_queries and "SEARCH" not in executed_categories:
                     search_tools = tool_registry.get_tools_by_category("SEARCH")
                     search_tool = search_tools[0] if search_tools else (
                         tool_registry.get_tool("api_unified_search") or tool_registry.get_tool("unifiedSearch") or tool_registry.get_tool("unified_search")
@@ -522,11 +522,13 @@ class AgentOrchestrator:
                 return
 
         # Case 2: On-Demand P2P Action Dispatched -> Complete first stream and await Client Callback (Native App only)
-        if is_app and emitted_actions:
-            first_action_cat = list(emitted_actions)[0]
+        # Note: TIMETABLE is excluded from pausing the stream so that fallback card + alternative guidance text is immediately synthesized!
+        action_wait_cats = [c for c in emitted_actions if c != "TIMETABLE"]
+        if is_app and action_wait_cats:
+            first_action_cat = action_wait_cats[0]
             logger.info(
                 f"[WAITING_FOR_ACTION_CALLBACK] query='{request.message[:40]}' "
-                f"actions={list(emitted_actions)}. Pausing stream for client callback."
+                f"actions={action_wait_cats}. Pausing stream for client callback."
             )
             yield AgentStreamEvent(
                 event_type="STATUS",
@@ -779,8 +781,8 @@ class AgentOrchestrator:
                 has_dispatched_action = False
                 action_category = "TIMETABLE" if is_timetable_tool else tool.category
 
-                # Case A-1: Mobile App Environment (ReactNativeWebView) -> Dispatch On-Demand P2P Scraping Action
-                if is_app:
+                # Case A-1: Mobile App Environment (ReactNativeWebView) -> Dispatch On-Demand P2P Scraping Action (Academic only)
+                if is_app and not is_timetable_tool:
                     if action_category not in emitted_actions:
                         try:
                             action_instruction = await tool.execute({}, exec_context)

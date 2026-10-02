@@ -259,8 +259,8 @@ async def test_e2e_timetable_dispatched_with_fallback_card():
             events.append(ev)
 
         event_types = [e.event_type for e in events]
-        assert "ACTION_REQUIRED" in event_types
         assert "CARD" in event_types
+        assert "TOKEN" in event_types
         cards = [e.card for e in events if e.event_type == "CARD" and e.card]
         assert len(cards) >= 1
         assert cards[0].title == "🗓️ 나의 수업 시간표"
