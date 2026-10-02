@@ -167,6 +167,8 @@ class AgentOrchestrator:
         executed_tool_signatures = set()
         successful_search_queries = set()
         failed_tool_categories: Dict[str, str] = {}
+        empty_directory_queries: Set[str] = set()
+        directory_found_results: bool = False
 
         # 3. Native Tool Calling ReAct Loop (Autonomous Multi-Hop with Streaming Thought)
         MAX_HOPS = 4
@@ -276,6 +278,30 @@ class AgentOrchestrator:
                             "function": {
                                 "name": notice_tool.name,
                                 "arguments": {"query": clean_q},
+                            }
+                        }]
+                    else:
+                        break
+                elif ("DIRECTORY" in executed_categories or "api_directory" in executed_tool_names) and empty_directory_queries and "SEARCH" not in executed_categories and not any("search" in n.lower() for n in executed_tool_names):
+                    search_tools = tool_registry.get_tools_by_category("SEARCH")
+                    search_tool = search_tools[0] if search_tools else (
+                        tool_registry.get_tool("api_unified_search") or tool_registry.get_tool("unifiedSearch") or tool_registry.get_tool("unified_search")
+                    )
+                    if search_tool:
+                        fallback_q = list(empty_directory_queries)[0] or request.message
+                        clean_q = AgentRouter._clean_entity_query(fallback_q) or fallback_q
+                        logger.info(f"Deterministic Multi-Hop: Chaining from empty DIRECTORY to {search_tool.name} for query '{clean_q}'")
+                        yield AgentStreamEvent(
+                            event_type="THINKING",
+                            thinking=f"교내 전화번호부 DB에 '{clean_q}' 관련 연락처가 확인되지 않아, 인천대학교 전 도메인 통합 검색({search_tool.name})을 통해 학교 공식 웹페이지 및 부서 안내에서 연락처를 추가 탐색합니다.",
+                        )
+                        from uuid import uuid4
+                        tool_calls = [{
+                            "id": f"call_auto_search_{uuid4().hex[:6]}",
+                            "type": "function",
+                            "function": {
+                                "name": search_tool.name,
+                                "arguments": {"q": clean_q, "query": clean_q},
                             }
                         }]
                     else:
@@ -391,9 +417,16 @@ class AgentOrchestrator:
                 ):
                     if event:
                         yield event
-                        if getattr(event, "event_type", None) == "STATUS" and getattr(event, "status_state", None) == "failed":
-                            q_val = fn_args.get("query") or fn_args.get("q") or request.message
-                            failed_tool_categories[target_tool.category.upper()] = str(q_val)
+                        if getattr(event, "event_type", None) == "STATUS":
+                            st_state = getattr(event, "status_state", None)
+                            if st_state == "failed":
+                                q_val = fn_args.get("query") or fn_args.get("q") or request.message
+                                failed_tool_categories[target_tool.category.upper()] = str(q_val)
+                            elif st_state == "empty" and target_tool.category.upper() == "DIRECTORY":
+                                q_val = fn_args.get("query") or fn_args.get("q") or request.message
+                                empty_directory_queries.add(str(q_val))
+                            elif st_state == "completed" and target_tool.category.upper() == "DIRECTORY":
+                                directory_found_results = True
                     if summary:
                         tool_summary_text += summary
                         tool_obs += summary
@@ -423,10 +456,10 @@ class AgentOrchestrator:
                     "content": tool_obs,
                 })
 
-            # If a contact query has now executed api_directory / DIRECTORY, all required multi-hop information is gathered.
+            # If a contact query has now executed api_directory / DIRECTORY and actually found results, multi-hop info is gathered.
             is_contact_query = any(kw in request.message for kw in ["연락처", "전화번호", "전화", "연구실", "번호", "이메일", "메일", "교수님", "교수", "담임교수", "지도교수", "과사", "사무실", "찾아줘"])
-            if is_contact_query and ("DIRECTORY" in executed_categories or "api_directory" in executed_tool_names):
-                logger.info("Multi-hop contact lookup complete (Portal + Directory). Proceeding directly to synthesis.")
+            if is_contact_query and directory_found_results:
+                logger.info("Multi-hop contact lookup successfully found results in Directory. Proceeding directly to synthesis.")
                 break
 
         # 4. Response Streaming Strategy
@@ -1287,10 +1320,11 @@ class AgentOrchestrator:
                             status_title = f"{q_param} 연락처 결과 없음" if q_param else f"{tool_display_name} 결과 없음"
                             summary_out = (
                                 f"\n[교내 부서/학과/교수 연락처 검색 결과 (검색어: '{q_param}')]:\n"
-                                f"- 검색어 '{q_param}' 관련 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다.\n"
-                                f"⚠️ 핵심 응답 지침: 교내 전화번호부 검색 결과 '{q_param}' 관련 연락처가 등록되어 있지 않습니다. "
-                                f"절대로 '조회 중입니다', '잠시만 기다려 주세요', '조회를 진행하겠습니다'라는 미완료/진행형 표현을 사용하지 마세요! "
-                                f"조회가 이미 완료되었으며 교내 DB에 미등록된 상태임을 사실대로 안내하고, 소속 단과대/학과 사무실(과사)로 직접 문의하도록 안내하여 답변을 완결하세요.\n"
+                                f"- 검색어 '{q_param}' 관련 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다 (0건).\n"
+                                f"💡 [자가 회복 및 교차 탐색 지침 (Self-Correction & Fallback)]:\n"
+                                f"전화번호부 DB에 일치하는 결과가 없습니다. 절대로 첫 시도 실패만으로 조회를 포기하지 마십시오!\n"
+                                f"1) 인천대학교 전 도메인 고도화 통합 검색 도구(api_unified_search 또는 unifiedSearch)를 즉시 호출하여 학교 공식 홈페이지, 부서 조직도, 공지사항 등에서 '{q_param}' 연락처 및 위치를 포괄적으로 검색하세요.\n"
+                                f"2) 또는 검색어를 단과대/핵심 명칭(예: '정보기술대학' 또는 '정보기술')으로 단순화하여 재검색을 시도하세요.\n"
                             )
                         else:
                             status_state = "completed"

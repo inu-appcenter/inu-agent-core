@@ -393,3 +393,107 @@ async def test_e2e_timetable_from_client_context():
         assert "ACTION_REQUIRED" not in event_types
         assert "DONE" in event_types
 
+
+@pytest.mark.asyncio
+async def test_e2e_fallback_cross_search_when_directory_empty():
+    """Verify that when api_directory returns empty (0 results), the agent does NOT prematurely give up;
+    it deterministically falls back to unifiedSearch to discover contact info from campus web pages and notices."""
+    await tool_registry.initialize_all_tools()
+    orchestrator = AgentOrchestrator()
+    request = ChatRequest(
+        message="정보기술대학 행정실 연락처 뭐야?",
+        history=[],
+    )
+
+    responses = [
+        # Hop 1: Model calls api_searchContacts (DIRECTORY) with '정보기술대학 행정실'
+        {
+            "thought": "정보기술대학 행정실의 연락처를 확인하기 위해 교내 전화번호부(api_searchContacts)를 호출합니다.",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_dir_empty_1",
+                    "type": "function",
+                    "function": {
+                        "name": "api_searchContacts",
+                        "arguments": {"query": "정보기술대학 행정실"},
+                    },
+                }
+            ],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 2: Model returns empty tool_calls -> Orchestrator Deterministic Multi-Hop kicks in and chains to SEARCH!
+        {
+            "thought": "전화번호부에서 결과를 찾지 못했습니다.",
+            "content": "",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 3: After auto SEARCH completes, model synthesizes final answer
+        {
+            "thought": "통합 검색 결과에서 정보기술대학 교학실 연락처를 확인했습니다. 사용자에게 안내합니다.",
+            "content": "안내 완료",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": "완료"},
+        },
+    ]
+
+    async def mock_stream_chat(messages):
+        yield "인천대학교 **정보기술대학 교학실(행정실)** 연락처 및 위치 안내입니다:\n"
+        yield "- 📞 전화번호: 032-835-8900\n"
+        yield "- 📍 위치: 송도캠퍼스 7호관(정보기술대학) 107호"
+
+    # Mock tool execution: api_searchContacts returns empty (0 results), unifiedSearch returns directory/contact hits
+    dir_tool = tool_registry.get_tool("api_searchContacts") or tool_registry.get_tool("api_directory")
+    search_tool = tool_registry.get_tool("unifiedSearch") or tool_registry.get_tool("api_unified_search")
+
+    orig_dir_exec = dir_tool.execute
+    orig_search_exec = search_tool.execute
+
+    async def mock_dir_execute(args, ctx):
+        return {"summary": "일치하는 교직원 또는 부서를 찾지 못했습니다.", "data": {"contents": []}}
+
+    async def mock_search_execute(args, ctx):
+        return {
+            "summary": "정보기술대학 교학실 연락처 (032-835-8900, 7호관 107호)",
+            "rawData": {
+                "totalCount": 1,
+                "directory": {
+                    "items": [
+                        {
+                            "name": "정보기술대학 교학실",
+                            "affiliation": "정보기술대학",
+                            "phoneNumber": "032-835-8900",
+                            "position": "행정실",
+                        }
+                    ]
+                }
+            }
+        }
+
+    with patch.object(dir_tool, "execute", side_effect=mock_dir_execute), \
+         patch.object(search_tool, "execute", side_effect=mock_search_execute), \
+         patch("app.orchestrator.engine.llm_client.chat_with_tools", side_effect=responses), \
+         patch("app.orchestrator.engine.llm_client.stream_chat", side_effect=mock_stream_chat):
+
+        events = []
+        async for ev in orchestrator.run_stream(request):
+            events.append(ev)
+
+        event_types = [e.event_type for e in events]
+        assert "THINKING" in event_types
+        assert "STATUS" in event_types
+        assert "TOKEN" in event_types
+        assert "DONE" in event_types
+
+        # Verify fallback chaining thought was emitted
+        thinking_texts = [e.thinking for e in events if e.event_type == "THINKING" and e.thinking]
+        has_fallback_thinking = any("통합 검색" in t for t in thinking_texts)
+        assert has_fallback_thinking, f"Expected fallback thinking mentioning 통합 검색, got: {thinking_texts}"
+
+        # Verify final text tokens contain phone number
+        tokens = [e.content for e in events if e.event_type == "TOKEN" and e.content]
+        full_text = "".join(tokens)
+        assert "032-835-8900" in full_text
+        assert "정보기술대학" in full_text
+
