@@ -207,3 +207,124 @@ async def test_e2e_library_seats_query():
         assert "CARD" in event_types
         assert "TOKEN" in event_types
         assert "DONE" in event_types
+
+
+@pytest.mark.asyncio
+async def test_e2e_timetable_dispatched_with_fallback_card():
+    await tool_registry.initialize_all_tools()
+    orchestrator = AgentOrchestrator()
+    request = ChatRequest(
+        message="포털에서 내 수강신청 내역 조회해줘",
+        history=[],
+        client_context={
+            "portal": {"linked": True},
+        },
+    )
+
+    responses = [
+        # Hop 1: Call Portal Timetable Tool
+        {
+            "thought": "학교 포털 수강신청 시간표를 확인하기 위해 action_portal_get_student_timetable을 호출합니다.",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_tt_1",
+                    "type": "function",
+                    "function": {
+                        "name": "action_portal_get_student_timetable",
+                        "arguments": {},
+                    },
+                }
+            ],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 2: Synthesis
+        {
+            "thought": "조회 상태를 확인하고 사용자에게 안내합니다.",
+            "content": "안내",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": "완료"},
+        },
+    ]
+
+    async def mock_stream_chat(messages):
+        yield "현재 인팁에 동기화된 이번 학기 수강신청 시간표가 등록되어 있지 않습니다. 인팁 앱의 [시간표] 탭에서 시간표를 추가하거나 관리할 수 있어요."
+
+    with patch("app.orchestrator.engine.llm_client.chat_with_tools", side_effect=responses), \
+         patch("app.orchestrator.engine.llm_client.stream_chat", side_effect=mock_stream_chat):
+
+        events = []
+        async for ev in orchestrator.run_stream(request):
+            events.append(ev)
+
+        event_types = [e.event_type for e in events]
+        assert "ACTION_REQUIRED" in event_types
+        assert "CARD" in event_types
+        cards = [e.card for e in events if e.event_type == "CARD" and e.card]
+        assert len(cards) >= 1
+        assert cards[0].title == "🗓️ 나의 수업 시간표"
+        assert "DONE" in event_types
+
+
+@pytest.mark.asyncio
+async def test_e2e_timetable_from_client_context():
+    await tool_registry.initialize_all_tools()
+    orchestrator = AgentOrchestrator()
+    request = ChatRequest(
+        message="내 시간표 보여줘",
+        history=[],
+        client_context={
+            "studentTimetable": [
+                {
+                    "title": "운영체제",
+                    "classroom": "공학관 405호",
+                    "time": "화 10:00~11:30",
+                }
+            ]
+        },
+    )
+
+    responses = [
+        # Hop 1: Call Portal Timetable Tool
+        {
+            "thought": "시간표 데이터를 확인합니다.",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_tt_2",
+                    "type": "function",
+                    "function": {
+                        "name": "action_portal_get_student_timetable",
+                        "arguments": {},
+                    },
+                }
+            ],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 2: Synthesis
+        {
+            "thought": "시간표 확인 완료",
+            "content": "시간표 안내",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": "완료"},
+        },
+    ]
+
+    async def mock_stream_chat(messages):
+        yield "이번 학기 수강 신청된 강의는 **운영체제(화 10:00~11:30, 공학관 405호)**입니다."
+
+    with patch("app.orchestrator.engine.llm_client.chat_with_tools", side_effect=responses), \
+         patch("app.orchestrator.engine.llm_client.stream_chat", side_effect=mock_stream_chat):
+
+        events = []
+        async for ev in orchestrator.run_stream(request):
+            events.append(ev)
+
+        event_types = [e.event_type for e in events]
+        assert "CARD" in event_types
+        cards = [e.card for e in events if e.event_type == "CARD" and e.card]
+        assert len(cards) >= 1
+        assert cards[0].title == "🗓️ 나의 수업 시간표"
+        assert "ACTION_REQUIRED" not in event_types
+        assert "DONE" in event_types
+

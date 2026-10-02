@@ -545,6 +545,8 @@ class AgentOrchestrator:
 
             domain_data = None
             is_academic_tool = "academic" in tool.name.lower() or "grade" in tool.name.lower()
+            is_timetable_tool = "timetable" in tool.name.lower() or "sukang" in tool.name.lower() or "tlsn" in tool.name.lower()
+
             if tool.category == "PORTAL" and is_academic_tool:
                 domain_data = (
                     client_ctx.get("academic")
@@ -554,11 +556,46 @@ class AgentOrchestrator:
                 )
                 if not domain_data and ("departmentName" in client_ctx or "advisorProfessorName" in client_ctx):
                     domain_data = client_ctx
+            elif is_timetable_tool:
+                domain_data = (
+                    client_ctx.get("studentTimetable")
+                    or client_ctx.get("timetable")
+                    or client_ctx.get("courses")
+                    or client_ctx.get("tlsnTimetable")
+                )
             elif tool.category == "LMS":
                 domain_data = client_ctx.get("lms")
 
             if domain_data and isinstance(domain_data, (dict, list)):
-                if tool.category == "PORTAL" and isinstance(domain_data, dict):
+                if is_timetable_tool:
+                    ac_data_out = domain_data if isinstance(domain_data, dict) else {"items": domain_data}
+                    classes = domain_data if isinstance(domain_data, list) else (
+                        domain_data.get("items") or domain_data.get("courses") or domain_data.get("todayClasses") or []
+                    )
+                    tt_lines = ["\n[학교 포털 수강신청 시간표 연동 데이터]:"]
+                    if classes:
+                        tt_lines.append(f"- 수강신청 완료된 교과목 (총 {len(classes)}과목):")
+                        for c in classes[:10]:
+                            if isinstance(c, dict):
+                                c_name = c.get("title") or c.get("courseName") or c.get("subject") or c.get("name") or "과목"
+                                c_room = c.get("room") or c.get("classroom") or c.get("location") or ""
+                                c_time = c.get("time") or c.get("classTime") or ""
+                                tt_lines.append(f"  • {c_name} | {c_time} | {c_room}".rstrip(" |"))
+                    else:
+                        tt_lines.append("- 현재 학기에 등록된 수강신청 내역이 없습니다.")
+                    summary_out = "\n".join(tt_lines) + "\n"
+
+                    if "TIMETABLE" not in emitted_cards:
+                        card = CardSynthesizer.synthesize_for_domain(
+                            domain="TIMETABLE",
+                            tool_name=tool.name,
+                            data=domain_data,
+                            query=request.message,
+                        )
+                        if card:
+                            yield (AgentStreamEvent(event_type="CARD", card=card), "", None, None)
+                            emitted_cards.add("TIMETABLE")
+                elif tool.category == "PORTAL" and isinstance(domain_data, dict):
                     display_data = client_ctx.get("academicDisplay")
                     merged_portal = {**domain_data, **(display_data if isinstance(display_data, dict) else {})}
 
@@ -566,6 +603,18 @@ class AgentOrchestrator:
                     clean_academic = sanitize_academic_record(merged_portal)
                     ac_data_out = clean_academic
                     summary_out = build_anonymized_academic_summary(clean_academic)
+
+                    if tool.category not in emitted_cards:
+                        card_source = (client_ctx.get("academicDisplay") or domain_data)
+                        card = CardSynthesizer.synthesize_for_domain(
+                            domain=tool.category,
+                            tool_name=tool.name,
+                            data=card_source,
+                            query=request.message,
+                        )
+                        if card:
+                            yield (AgentStreamEvent(event_type="CARD", card=card), "", None, None)
+                            emitted_cards.add(tool.category)
                 elif tool.category == "LMS" and isinstance(domain_data, (dict, list)):
                     events = []
                     courses = []
@@ -599,20 +648,20 @@ class AgentOrchestrator:
 
                     summary_out = "\n".join(lms_lines) + "\n"
 
-                if tool.category not in emitted_cards:
-                    card_source = (client_ctx.get("academicDisplay") or domain_data) if tool.category == "PORTAL" else domain_data
-                    card = CardSynthesizer.synthesize_for_domain(
-                        domain=tool.category,
-                        tool_name=tool.name,
-                        data=card_source,
-                        query=request.message,
-                    )
-                    if card:
-                        yield (AgentStreamEvent(event_type="CARD", card=card), "", None, None)
-                        emitted_cards.add(tool.category)
+                    if tool.category not in emitted_cards:
+                        card = CardSynthesizer.synthesize_for_domain(
+                            domain=tool.category,
+                            tool_name=tool.name,
+                            data=domain_data,
+                            query=request.message,
+                        )
+                        if card:
+                            yield (AgentStreamEvent(event_type="CARD", card=card), "", None, None)
+                            emitted_cards.add(tool.category)
             else:
                 has_dispatched_action = False
-                if tool.category not in emitted_actions:
+                action_category = "TIMETABLE" if is_timetable_tool else tool.category
+                if action_category not in emitted_actions:
                     try:
                         action_instruction = await tool.execute({}, exec_context)
                         if hasattr(action_instruction, "action_id"):
@@ -621,31 +670,60 @@ class AgentOrchestrator:
                                 f"target={action_instruction.request.url if action_instruction.request else 'none'}"
                             )
                             yield (AgentStreamEvent(event_type="ACTION_REQUIRED", action=action_instruction), "", None, None)
-                            emitted_actions.add(tool.category)
+                            emitted_actions.add(action_category)
                             has_dispatched_action = True
                     except Exception as ex:
                         logger.warning(f"Failed to generate client action for {tool.name}: {ex}")
 
                 # 1. On-demand dynamic Client Action dispatched to client (Coocon P2P scraping)
                 if has_dispatched_action:
-                    summary_out = (
-                        f"\n[{tool.category}_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 하달했습니다. "
-                        "현재 단말기가 학교 종합정보시스템(ERP)과 직접 통신하여 최신 수강신청 내역/시간표를 조회하고 있습니다. "
-                        "(⚠️ 최우선 핵심 지침: 단말기 조회가 완료되기 전까지 시스템 조회 데이터에 과목 정보가 없으므로, 임의의 과목명이나 강의실을 절대로 지어내거나 추측하지 마세요! "
-                        "계정 연동 카드를 누르라고 안내하지 말고, '기기에서 학교 포털 종합정보시스템(ERP)에 접속하여 최신 수강신청 내역과 시간표를 안전하게 불러오는 중입니다. 조회가 완료되면 정식 시간표 카드가 표시됩니다'라고만 정직하게 안내하세요.)\n"
-                    )
+                    if is_timetable_tool:
+                        summary_out = (
+                            f"\n[TIMETABLE_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 전달했습니다. "
+                            "현재 세션에 사전 동기화된 이번 학기 수강신청/시간표 데이터가 없습니다. "
+                            "(⚠️ 최우선 핵심 지침: 임의의 과목명이나 강의실을 절대로 지어내지 마세요! "
+                            "또한 단일 대화 턴이므로 '잠시만 기다려 주세요' 또는 '불러오는 중입니다'라는 말로만 답변을 끝내지 마십시오. "
+                            "'현재 인팁에 동기화된 이번 학기 수강신청 시간표가 등록되어 있지 않습니다. 인팁 앱의 [시간표] 탭에서 시간표를 추가하거나 관리할 수 있습니다'라고 대안과 함께 친절하고 명확하게 안내하세요.)\n"
+                        )
+                        if "TIMETABLE" not in emitted_cards:
+                            fallback_card = CardSynthesizer.synthesize_for_domain(
+                                domain="TIMETABLE",
+                                tool_name=tool.name,
+                                data=None,
+                                query=request.message,
+                            )
+                            if fallback_card:
+                                yield (AgentStreamEvent(event_type="CARD", card=fallback_card), "", None, None)
+                                emitted_cards.add("TIMETABLE")
+                    else:
+                        summary_out = (
+                            f"\n[{tool.category}_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 하달했습니다. "
+                            "현재 단말기가 학교 종합정보시스템(ERP)과 직접 통신하여 최신 학적 내역을 확인하고 있습니다. "
+                            "(⚠️ 최우선 핵심 지침: 단말기 조회가 완료되기 전까지 시스템 조회 데이터에 정보가 없으므로, 임의의 정보를 절대로 지어내거나 추측하지 마세요! "
+                            "계정 연동 카드를 누르라고 안내하지 말고, '기기에서 학교 포털 종합정보시스템(ERP)에 접속하여 최신 학적 정보를 안전하게 불러오는 중입니다'라고 정직하게 안내하세요.)\n"
+                        )
                 # 2. Portal account linked but ERP response timed out or failed
                 elif tool.category == "PORTAL" and is_portal_linked:
                     err_msg = portal_meta.get("academicErrorMessage") or "포털 또는 ERP 응답을 확인하지 못했습니다."
-                    if tool.category not in emitted_cards:
-                        fetch_fail_card = CardSynthesizer.synthesize_for_domain(
-                            domain="PORTAL",
-                            tool_name=tool.name,
-                            data={"status": "FETCH_FAILED", "message": err_msg},
-                            query=request.message,
-                        )
+                    target_domain = "TIMETABLE" if is_timetable_tool else "PORTAL"
+                    if target_domain not in emitted_cards:
+                        if is_timetable_tool:
+                            fetch_fail_card = CardSynthesizer.synthesize_for_domain(
+                                domain="TIMETABLE",
+                                tool_name=tool.name,
+                                data=None,
+                                query=request.message,
+                            )
+                        else:
+                            fetch_fail_card = CardSynthesizer.synthesize_for_domain(
+                                domain="PORTAL",
+                                tool_name=tool.name,
+                                data={"status": "FETCH_FAILED", "message": err_msg},
+                                query=request.message,
+                            )
                         if fetch_fail_card:
                             yield (AgentStreamEvent(event_type="CARD", card=fetch_fail_card), "", None, None)
+                            emitted_cards.add(target_domain)
                             emitted_cards.add(tool.category)
 
                     summary_out = (
