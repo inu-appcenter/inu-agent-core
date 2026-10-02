@@ -229,7 +229,7 @@ class AgentOrchestrator:
 
             if not tool_calls:
                 # Deterministic Multi-Hop: 지도교수 연락처 질의 시 학적 조회 후 api_directory 미실행 상태면 자동 연쇄 호출
-                is_contact_query = any(kw in request.message for kw in ["연락처", "전화번호", "연구실", "번호", "이메일", "교수님", "과사", "사무실"])
+                is_contact_query = any(kw in request.message for kw in ["연락처", "전화번호", "전화", "연구실", "번호", "이메일", "메일", "교수님", "교수", "담임교수", "지도교수", "과사", "사무실", "찾아줘"])
                 advisor_name = academic_data_dict.get("advisor") or academic_data_dict.get("advisorProfessorName")
                 if not advisor_name and request.client_context:
                     acad_disp = request.client_context.get("academicDisplay")
@@ -1444,7 +1444,7 @@ class AgentOrchestrator:
                     tool_summary_lines.append(f"- 과제/일정: {ev_name}")
 
         orig_query = callback.original_message or ""
-        is_contact_query = any(kw in orig_query for kw in ["연락처", "전화번호", "연구실", "번호", "이메일", "교수님", "과사", "사무실"])
+        is_contact_query = any(kw in orig_query for kw in ["연락처", "전화번호", "전화", "연구실", "번호", "이메일", "메일", "교수님", "교수", "담임교수", "지도교수", "과사", "사무실", "찾아줘"])
 
         # 3. Multi-Hop Chaining: Contact query + Advisor Professor found
         if is_contact_query and advisor_name:
