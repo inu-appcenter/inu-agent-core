@@ -555,7 +555,10 @@ class AgentOrchestrator:
         Helper generator to execute a single tool, emitting status events and returning (event, summary, academic_data, rag_data).
         """
         tool_display_name = resolve_tool_display_name(tool.category, tool.name)
-        tool_id = f"tool_{tool.category.lower()}_{abs(hash(tool.name)) % 10000}"
+        if tool.category in ["LMS", "PORTAL"]:
+            tool_id = f"tool_{tool.category.lower()}"
+        else:
+            tool_id = f"tool_{tool.category.lower()}_{abs(hash(tool.name)) % 10000}"
 
         summary_out = ""
         ac_data_out = {}
@@ -569,7 +572,7 @@ class AgentOrchestrator:
                 AgentStreamEvent(
                     event_type="STATUS",
                     status_id=tool_id,
-                    status_title=f"{tool_display_name} 연동 중...",
+                    status_title=f"{tool_display_name} 조회 중...",
                     status_category=tool.category,
                     status_state="running",
                 ),
@@ -583,6 +586,7 @@ class AgentOrchestrator:
             is_portal_linked = portal_meta.get("linked") is True
 
             domain_data = None
+            has_dispatched_action = False
             is_academic_tool = "academic" in tool.name.lower() or "grade" in tool.name.lower()
             is_timetable_tool = "timetable" in tool.name.lower() or "sukang" in tool.name.lower() or "tlsn" in tool.name.lower()
 
@@ -800,13 +804,23 @@ class AgentOrchestrator:
                             "앱의 '설정'이나 '마이페이지' 등 다른 메뉴를 안내하지 말고, 오직 '화면에 표시된 [포털 계정 연동하기] 카드를 눌러 연동을 진행해 주세요'라고만 정확히 안내해야 합니다.)\n"
                         )
 
+            if has_dispatched_action:
+                status_state = "running"
+                status_title = f"{tool_display_name} 조회 중..."
+            elif domain_data:
+                status_state = "completed"
+                status_title = f"{tool_display_name} 확인 완료"
+            else:
+                status_state = "failed"
+                status_title = f"{tool_display_name} 조회 실패"
+
             yield (
                 AgentStreamEvent(
                     event_type="STATUS",
                     status_id=tool_id,
-                    status_title=f"{tool_display_name} 연동 확인",
+                    status_title=status_title,
                     status_category=tool.category,
-                    status_state="completed",
+                    status_state=status_state,
                 ),
                 summary_out,
                 ac_data_out,
@@ -910,6 +924,7 @@ class AgentOrchestrator:
                                 f"- 실시간 도착 정보:\n{json.dumps(filtered_arrivals, ensure_ascii=False)}\n"
                             )
                         else:
+                            status_title = f"{tool_display_name} 결과 없음"
                             summary_out = (
                                 f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n"
                                 f"- 모니터링 노선: {', '.join(valid_routes)}\n"
@@ -958,6 +973,7 @@ class AgentOrchestrator:
                             lines.append("\n⚠️ 핵심 지침: 반드시 위 실제 조회된 메뉴 목록에 근거하여 안내하세요. 위 목록에 없는 가상의 메뉴를 절대로 추가하거나 지어내지 마세요.")
                             summary_out = "\n".join(lines) + "\n"
                         else:
+                            status_title = f"{tool_display_name} 결과 없음"
                             summary_out = (
                                 f"\n[CAFETERIA {caf_name} 식단 메뉴 조회 결과]:\n"
                                 f"- 현재 {caf_name}에 등록된 식단 메뉴가 없습니다 (식당 운영 시간 외 또는 식단 미등록 상태).\n"
@@ -1008,6 +1024,7 @@ class AgentOrchestrator:
                             classes = res.get("items") or res.get("todayClasses") or res.get("courses") or []
 
                         if not classes:
+                            status_title = f"{tool_display_name} 결과 없음"
                             summary_out = (
                                 "\n[INTIP 인팁 시간표 조회 결과]:\n"
                                 "- 오늘 등록된 수업/강의 일정이 없습니다 (또는 인팁 앱에 시간표가 등록되어 있지 않습니다).\n"
@@ -1054,6 +1071,7 @@ class AgentOrchestrator:
                                         dept_label = f"{dept} ({colg})" if colg else dept
                                         lines.append(f"- {dept_label} 학과 사무실: 📞 {phone}" + (f" (위치: {loc})" if loc else ""))
                             else:
+                                status_title = f"{tool_display_name} 결과 없음"
                                 lines.append(f"- '{q_param}' 관련 학과 사무실 연락처가 조회되지 않았습니다.")
                             lines.append("💡 지침: 위 학과 사무실 번호는 학과 사무실(과사) 번호이며 교수님 개인 연구실 번호가 아닙니다. 학과 사무실 번호임을 명확히 구분하여 안내하세요.")
                             summary_out = "\n".join(lines) + "\n"
@@ -1070,6 +1088,7 @@ class AgentOrchestrator:
                                         email = e.get("email") or ""
                                         lines.append(f"- {name} ({pos}, {affil}): 📞 {phone}" + (f", ✉️ {email}" if email else ""))
                             else:
+                                status_title = f"{tool_display_name} 결과 없음"
                                 lines.append(f"- 검색어 '{q_param}' 관련 교수/교직원 개인 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다.")
                     elif tool.category == "SCHEDULE":
                         tool_data = res
@@ -1091,6 +1110,7 @@ class AgentOrchestrator:
                                     lines.append(f"- [{title}]({cal_link}) (기간: {date_str})")
                             lines.append("\n💡 [학사일정 링크 작성 지침]: 학사일정에는 절대 공지사항 링크(/home/notice/{id})를 붙이지 마세요! 위 제공된 인팁 앱 캘린더 상대 경로인 `[일정명](/home/calendar?date=YYYY-MM-DD)`(시작일 기준) 또는 `[학사일정 전체보기](/home/calendar)`로만 마크다운 링크를 표(|---|---|)나 목록에 그대로 작성하세요.")
                         else:
+                            status_title = f"{tool_display_name} 결과 없음"
                             lines.append("- 조회된 학사일정이 없습니다.")
                             lines.append("💡 [학사일정 링크 작성 지침]: 학생에게 등록된 일정이 없음을 안내하고, 전체 학사일정을 확인할 수 있도록 `[학사일정 전체보기](/home/calendar)` 링크를 제공하세요.")
                         summary_out = "\n".join(lines) + "\n"
@@ -1117,6 +1137,7 @@ class AgentOrchestrator:
                                     lines.append(f"- {link_str}{sub_str}")
                             lines.append("💡 [중요 지침]: 위 공지 제목과 내부 상세 링크(/home/notice/{공지ID})를 마크다운 링크 형식([공지제목](/home/notice/{id}))으로 답변에 그대로 포함하여 안내하세요. 외부 브라우저로 나가지 않고 INTIP 앱 내부 상세 페이지로 열립니다.")
                         else:
+                            status_title = f"{tool_display_name} 결과 없음"
                             lines.append("- 조회된 공지사항이 없습니다.")
                         summary_out = "\n".join(lines) + "\n"
                     elif tool.category == "SEARCH" or "unifiedsearch" in tool.name.lower():
@@ -1196,6 +1217,7 @@ class AgentOrchestrator:
                                     lines.append(f"  • {p.get('title')} ({p.get('board')}, 추천: {p.get('likeCount')})")
 
                             if total_cnt == 0:
+                                status_title = f"{tool_display_name} 결과 없음"
                                 lines.append("- 검색 결과가 0건입니다.")
                                 lines.append("💡 [자율 재검색 지침]: 결과가 0건이므로, 질문에서 불필요한 수식어를 덜어내거나 상위어/동의어로 검색어를 완화하여 1회 재검색(Query Expansion)할 수 있습니다. 이미 재검색했거나 마땅한 키워드가 없으면 검색 결과가 없음을 친절히 안내하세요.")
                             else:
@@ -1210,7 +1232,7 @@ class AgentOrchestrator:
             except Exception as ex:
                 logger.warning(f"Error executing tool {tool.name}: {ex}")
                 status_state = "failed"
-                status_title = f"{tool_display_name} 일시 조회 지연"
+                status_title = f"{tool_display_name} 조회 실패"
                 summary_out = (
                     f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 통신 오류({str(ex)})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
                     f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보를 지어내지 말고, '현재 교내 시스템 일시 오류로 실시간 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
@@ -1273,7 +1295,7 @@ class AgentOrchestrator:
                     inu_q = f"{clean_msg}\n\n[비식별 학적 참고정보: {', '.join(ac_parts)}]"
 
             status_state = "completed"
-            status_title = f"{tool_display_name} 검색 완료"
+            status_title = f"{tool_display_name} 확인 완료"
 
             try:
                 res = await tool.execute({"question": inu_q}, exec_context)
@@ -1294,8 +1316,8 @@ class AgentOrchestrator:
                             yield (AgentStreamEvent(event_type="CARD", card=card), "", None, None)
                             emitted_cards.add("INU_AI_KNOWLEDGE")
                 else:
-                    status_state = "failed"
-                    status_title = f"{tool_display_name} 검색 결과 없음"
+                    status_state = "completed"
+                    status_title = f"{tool_display_name} 결과 없음"
                     summary_out = (
                         f"\n[시스템 학칙 지식베이스 검색 결과 없음]: 관련 학칙/규정 정보를 찾지 못했습니다.\n"
                         f"⚠️ 핵심 지침: 가상의 학칙 규정을 지어내지 말고, 지식베이스에서 해당 내용을 찾지 못했음을 사실대로 안내하세요.\n"
@@ -1303,7 +1325,7 @@ class AgentOrchestrator:
             except Exception as ex:
                 logger.warning(f"Error executing INUChat tool {tool.name}: {ex}")
                 status_state = "failed"
-                status_title = f"{tool_display_name} 검색 일시 지연"
+                status_title = f"{tool_display_name} 조회 실패"
                 summary_out = (
                     f"\n[시스템 오류 고지]: 학칙/규정 지식베이스 검색 중 일시적인 오류({str(ex)})가 발생했습니다.\n"
                     f"⚠️ 핵심 지침: 가상의 학칙 조항을 지어내지 말고, 일시적인 지식베이스 통신 지연 사실을 안내하세요.\n"
@@ -1347,6 +1369,8 @@ class AgentOrchestrator:
         else:
             domain = "PORTAL"
 
+        domain_display_name = resolve_tool_display_name(domain, callback.action_id)
+
         # 1. Action execution failed on client/device
         if not callback.success:
             err_msg = callback.error_message or "학교 공식 시스템 연동 중 일시적인 오류가 발생했습니다."
@@ -1354,8 +1378,8 @@ class AgentOrchestrator:
 
             yield AgentStreamEvent(
                 event_type="STATUS",
-                status_id="action_resume_fail",
-                status_title="학교 시스템 조회 실패",
+                status_id=f"tool_{domain.lower()}",
+                status_title=f"{domain_display_name} 조회 실패",
                 status_category=domain,
                 status_state="failed",
             )
@@ -1376,10 +1400,27 @@ class AgentOrchestrator:
             return
 
         # 2. Action execution succeeded -> Synthesize Card & Grounding
+        data = callback.data or {}
+        is_empty_data = False
+        if domain == "TIMETABLE":
+            raw_courses = data if isinstance(data, list) else (
+                data.get("courses") or data.get("items") or data.get("timetable") or []
+            ) if isinstance(data, dict) else []
+            if not raw_courses:
+                is_empty_data = True
+        elif domain == "LMS":
+            events = data.get("events", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            if not events:
+                is_empty_data = True
+        elif not data:
+            is_empty_data = True
+
+        status_title = f"{domain_display_name} 결과 없음" if is_empty_data else f"{domain_display_name} 확인 완료"
+
         yield AgentStreamEvent(
             event_type="STATUS",
-            status_id="action_resume_success",
-            status_title="학교 공식 시스템 데이터 연동 완료! 최종 답변을 정리합니다.",
+            status_id=f"tool_{domain.lower()}",
+            status_title=status_title,
             status_category=domain,
             status_state="completed",
         )
@@ -1489,18 +1530,27 @@ class AgentOrchestrator:
                                 tool_summary_lines.append(
                                     f"- {c_name} ({c_dept}): 전화={c_tel}, 이메일={c_email}, 위치={c_loc}"
                                 )
+                        chain_status_title = f"{advisor_name} 교수님 연락처 확인 완료"
                     else:
                         tool_summary_lines.append(f"- {advisor_name} 교수님의 공식 등록 연락처를 찾지 못했습니다.")
+                        chain_status_title = f"{advisor_name} 교수님 연락처 결과 없음"
 
                     yield AgentStreamEvent(
                         event_type="STATUS",
                         status_id="contact_chain_search",
-                        status_title=f"{advisor_name} 교수님 연락처 확인 완료",
+                        status_title=chain_status_title,
                         status_category="DIRECTORY",
                         status_state="completed",
                     )
                 except Exception as ex:
                     logger.warning(f"Error running chained api_directory: {ex}")
+                    yield AgentStreamEvent(
+                        event_type="STATUS",
+                        status_id="contact_chain_search",
+                        status_title=f"{advisor_name} 교수님 연락처 조회 실패",
+                        status_category="DIRECTORY",
+                        status_state="failed",
+                    )
 
         # 4. Final LLM Response Synthesis Stream
         tool_summary_text = "\n".join(tool_summary_lines)
