@@ -9,6 +9,7 @@ from uuid import uuid4
 from app.core.config import settings
 from app.core.logging import logger
 from app.tools.base import BaseTool
+from app.tools.coercer import SchemaCoercer
 
 
 class McpRemoteTool(BaseTool):
@@ -44,6 +45,9 @@ class McpRemoteTool(BaseTool):
         """
         Execute tool call against remote MCP Server using JSON-RPC 2.0.
         """
+        # Dynamically coerce arguments against schema
+        sanitized_arguments = SchemaCoercer.coerce(self.input_schema, arguments)
+
         req_id = f"mcp_{uuid4().hex[:8]}"
         payload = {
             "jsonrpc": "2.0",
@@ -51,7 +55,7 @@ class McpRemoteTool(BaseTool):
             "method": "tools/call",
             "params": {
                 "name": self.original_name,
-                "arguments": arguments,
+                "arguments": sanitized_arguments,
             },
         }
 
@@ -88,9 +92,14 @@ class McpRemoteTool(BaseTool):
                         if isinstance(item, dict) and item.get("type") == "text":
                             text_content += item.get("text", "")
 
-                if is_error:
-                    logger.warning(f"MCP remote tool [{self.name}] indicated isError=True: {text_content}")
-                    return {"error": text_content or "MCP execution failed", "summary": text_content}
+                is_val_err = "올바르지 않습니다" in text_content or "파라미터" in text_content
+                if is_error or is_val_err:
+                    logger.warning(f"MCP remote tool [{self.name}] indicated error (val_err={is_val_err}): {text_content}")
+                    return {
+                        "error": text_content or "MCP execution failed",
+                        "summary": text_content,
+                        "is_validation_error": is_val_err,
+                    }
 
                 return {
                     "summary": text_content,
@@ -138,6 +147,32 @@ class McpConnector:
                     name = t.get("name", "")
                     description = t.get("description", "")
                     input_schema = t.get("inputSchema", {"type": "object", "properties": {}})
+
+                    # Schema Augmentation: enrich parameters and descriptions for LLM compliance
+                    input_schema = dict(input_schema or {"type": "object", "properties": {}})
+                    props = dict(input_schema.get("properties", {}))
+                    name_upper = name.upper()
+                    if "UNIFIED_SEARCH" in name_upper and not props:
+                        props["query"] = {
+                            "type": "string",
+                            "description": "교내 통합 검색어 (공지사항, 학사일정, 교수/학과 연락처 등)",
+                        }
+                    elif "LOST_PROPERTY" in name_upper and not props:
+                        props["query"] = {
+                            "type": "string",
+                            "description": "분실물 검색어 (예: 지갑, 에어팟, 학생증, 우산 등)",
+                        }
+                    for p_name, p_def in props.items():
+                        if isinstance(p_def, dict):
+                            p_desc = p_def.get("description", "")
+                            p_enum = p_def.get("enum")
+                            p_type = p_def.get("type")
+                            if p_enum and not any(kw in p_desc for kw in ["허용 값", "Enum", "중 하나"]):
+                                p_def["description"] = f"{p_desc} (허용 값: {', '.join(map(str, p_enum))})".strip()
+                            elif p_type == "integer" and any(kw in p_name.lower() or kw in p_desc for kw in ["day", "요일"]):
+                                if "정수" not in p_desc:
+                                    p_def["description"] = f"{p_desc} (반드시 월=1부터 일=7까지의 정수)".strip()
+                    input_schema["properties"] = props
 
                     # Infer category accurately based on tool name and domain
                     name_lower = name.lower()

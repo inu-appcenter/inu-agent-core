@@ -26,6 +26,7 @@ from app.orchestrator.card_synthesizer import CardSynthesizer
 from app.orchestrator.router import AgentRouter
 from app.tools.base import BaseTool
 from app.tools.registry import tool_registry
+from app.tools.coercer import SchemaCoercer
 
 
 def resolve_tool_display_name(category: str, name: str) -> str:
@@ -924,81 +925,9 @@ class AgentOrchestrator:
                     "tabName": tab_name,
                 }
 
-            # Middleware: Cafeteria argument normalization
-            if tool.category == "CAFETERIA":
-                # 1. mealType normalization
-                raw_meal = str(final_args.get("mealType") or "").strip().upper()
-                if raw_meal in ["점심", "중식", "LUNCH"]:
-                    final_args["mealType"] = "LUNCH"
-                elif raw_meal in ["아침", "조식", "BREAKFAST"]:
-                    final_args["mealType"] = "BREAKFAST"
-                elif raw_meal in ["저녁", "석식", "DINNER"]:
-                    final_args["mealType"] = "DINNER"
-                elif raw_meal in ["전체", "ALL", "자동", "AUTO"]:
-                    final_args["mealType"] = "AUTO"
-                elif raw_meal:
-                    final_args["mealType"] = "AUTO"
-
-                # 2. cafeteria name normalization
-                raw_caf = str(final_args.get("cafeteria") or "").strip()
-                caf_mapping = {
-                    "학식": "학생식당",
-                    "학생식당": "학생식당",
-                    "제1학생식당": "학생식당",
-                    "1학식": "학생식당",
-                    "1기숙사": "제1기숙사식당",
-                    "제1기숙사": "제1기숙사식당",
-                    "제1기숙사식당": "제1기숙사식당",
-                    "1긱": "제1기숙사식당",
-                    "2기숙사": "2기숙사 식당",
-                    "2기숙사 식당": "2기숙사 식당",
-                    "제2기숙사": "2기숙사 식당",
-                    "2긱": "2기숙사 식당",
-                    "2호관": "2호관(교직원)식당",
-                    "교직원": "2호관(교직원)식당",
-                    "교직원식당": "2호관(교직원)식당",
-                    "2호관(교직원)식당": "2호관(교직원)식당",
-                    "27호관": "27호관식당",
-                    "27호관식당": "27호관식당",
-                    "이공계": "27호관식당",
-                    "이공계식당": "27호관식당",
-                    "사범대": "사범대식당",
-                    "사범대식당": "사범대식당",
-                    "전체": "전체",
-                    "all": "전체",
-                    "ALL": "전체",
-                }
-                if raw_caf in caf_mapping:
-                    final_args["cafeteria"] = caf_mapping[raw_caf]
-                elif raw_caf and raw_caf not in ["전체", "학생식당", "제1기숙사식당", "2기숙사 식당", "2호관(교직원)식당", "27호관식당", "사범대식당"]:
-                    final_args["cafeteria"] = "전체"
-
-                # 3. day normalization
-                raw_day = final_args.get("day")
-                if raw_day is not None:
-                    if str(raw_day).strip().upper() in ["TODAY", "오늘"]:
-                        final_args["day"] = datetime.now(timezone(timedelta(hours=9))).weekday() + 1
-                    else:
-                        try:
-                            d_int = int(raw_day)
-                            if 1 <= d_int <= 7:
-                                final_args["day"] = d_int
-                            else:
-                                final_args["day"] = datetime.now(timezone(timedelta(hours=9))).weekday() + 1
-                        except (ValueError, TypeError):
-                            final_args["day"] = datetime.now(timezone(timedelta(hours=9))).weekday() + 1
-
-            # Middleware: Timetable gap argument normalization
-            if tool.category == "TIMETABLE_GAP":
-                raw_day = final_args.get("day")
-                if raw_day is not None:
-                    if str(raw_day).strip().upper() in ["TODAY", "오늘"]:
-                        final_args["day"] = datetime.now(timezone(timedelta(hours=9))).weekday() + 1
-                    else:
-                        try:
-                            final_args["day"] = int(raw_day)
-                        except (ValueError, TypeError):
-                            final_args.pop("day", None)
+            # Schema-driven dynamic parameter coercion (Generic MCP standard)
+            schema_params = getattr(tool, "input_schema", None) or {}
+            final_args = SchemaCoercer.coerce(schema_params, final_args)
 
             status_state = "completed"
             status_title = f"{tool_display_name} 확인 완료"
@@ -1007,13 +936,24 @@ class AgentOrchestrator:
                 res = await tool.execute(final_args, exec_context)
                 if isinstance(res, dict) and "error" in res:
                     err_msg = res.get("error", "알 수 없는 통신 오류")
-                    status_state = "failed"
-                    status_title = f"{tool_display_name} 조회 실패"
-                    summary_out = (
-                        f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 서버 응답 지연 또는 오류({err_msg})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
-                        f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보(식단 메뉴, 버스 도착 시간, 전화번호, 시간표 등)를 지어내지 말고, "
-                        f"'현재 교내 시스템 일시 오류로 실시간 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
-                    )
+                    is_val_err = res.get("is_validation_error") or ("올바르지 않습니다" in err_msg or "파라미터" in err_msg)
+                    if is_val_err:
+                        status_state = "failed"
+                        status_title = f"{tool_display_name} 입력값 오류"
+                        summary_out = (
+                            f"\n[도구 입력 형식 오류 (Tool Parameter Error)]:\n"
+                            f"서버 반환 메시지: {err_msg}\n"
+                            f"💡 [자가 수정(Self-Correction) 지침]: 도구 파라미터가 유효하지 않아 호출에 실패했습니다. "
+                            f"위 오류 메시지와 도구 스키마(inputSchema)의 허용 값/형식을 확인하고, 올바른 값으로 즉시 수정하여 도구를 다시 호출하세요.\n"
+                        )
+                    else:
+                        status_state = "failed"
+                        status_title = f"{tool_display_name} 조회 실패"
+                        summary_out = (
+                            f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 서버 응답 지연 또는 오류({err_msg})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
+                            f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보(식단 메뉴, 버스 도착 시간, 전화번호, 시간표 등)를 지어내지 말고, "
+                            f"'현재 교내 시스템 일시 오류로 실시간 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
+                        )
                 elif res is not None:
                     if tool.category == "BUS":
                         mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
