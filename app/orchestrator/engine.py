@@ -88,6 +88,8 @@ class AgentOrchestrator:
             return
 
         # 1. Index and retrieve candidate tools
+        if not tool_registry.list_tools():
+            await tool_registry.initialize_all_tools()
         if not tool_retriever.is_indexed:
             await tool_retriever.index_tools(tool_registry.list_tools())
 
@@ -488,7 +490,8 @@ class AgentOrchestrator:
             is_portal_linked = portal_meta.get("linked") is True
 
             domain_data = None
-            if tool.category == "PORTAL":
+            is_academic_tool = "academic" in tool.name.lower() or "grade" in tool.name.lower()
+            if tool.category == "PORTAL" and is_academic_tool:
                 domain_data = (
                     client_ctx.get("academic")
                     or client_ctx.get("academicDisplay")
@@ -497,7 +500,7 @@ class AgentOrchestrator:
                 )
                 if not domain_data and ("departmentName" in client_ctx or "advisorProfessorName" in client_ctx):
                     domain_data = client_ctx
-            else:
+            elif tool.category == "LMS":
                 domain_data = client_ctx.get("lms")
 
             if domain_data and isinstance(domain_data, (dict, list)):
@@ -568,9 +571,10 @@ class AgentOrchestrator:
                 # 1. On-demand dynamic Client Action dispatched to client (Coocon P2P scraping)
                 if has_dispatched_action:
                     summary_out = (
-                        f"\n[{tool.category}_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 전달했습니다. "
-                        "단말기가 기기 보안 영역을 통해 학교 시스템과 직접 통신하여 최신 데이터를 안전하게 조회하고 있습니다. "
-                        "(⚠️ 중요 지침: 계정 연동 카드를 누르라고 절대 안내하지 마세요! 이미 연동되어 조회가 진행 중이거나 화면에 결과 카드가 표시될 예정임을 친절히 안내하세요.)\n"
+                        f"\n[{tool.category}_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 하달했습니다. "
+                        "현재 단말기가 학교 종합정보시스템(ERP)과 직접 통신하여 최신 수강신청 내역/시간표를 조회하고 있습니다. "
+                        "(⚠️ 최우선 핵심 지침: 단말기 조회가 완료되기 전까지 시스템 조회 데이터에 과목 정보가 없으므로, 임의의 과목명이나 강의실을 절대로 지어내거나 추측하지 마세요! "
+                        "계정 연동 카드를 누르라고 안내하지 말고, '기기에서 학교 포털 종합정보시스템(ERP)에 접속하여 최신 수강신청 내역과 시간표를 안전하게 불러오는 중입니다. 조회가 완료되면 정식 시간표 카드가 표시됩니다'라고만 정직하게 안내하세요.)\n"
                     )
                 # 2. Portal account linked but ERP response timed out or failed
                 elif tool.category == "PORTAL" and is_portal_linked:

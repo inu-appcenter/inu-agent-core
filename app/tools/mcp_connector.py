@@ -134,18 +134,34 @@ class McpConnector:
                     description = t.get("description", "")
                     input_schema = t.get("inputSchema", {"type": "object", "properties": {}})
 
-                    # Infer category
-                    name_upper = name.upper()
-                    if "TIMETABLE" in name_upper:
+                    # Infer category accurately based on tool name and domain
+                    name_lower = name.lower()
+                    if "timetable" in name_lower:
                         cat = "TIMETABLE"
-                    elif "CAFETERIA" in name_upper:
+                    elif "cafeteria" in name_lower or "menu" in name_lower:
                         cat = "CAFETERIA"
-                    elif "BUS" in name_upper:
+                    elif "bus" in name_lower or "shuttle" in name_lower:
                         cat = "BUS"
-                    elif "LIBRARY" in name_upper:
+                    elif "library" in name_lower or "seat" in name_lower:
                         cat = "LIBRARY"
-                    else:
+                    elif "notice" in name_lower:
+                        cat = "NOTICE"
+                    elif "schedule" in name_lower or "calendar" in name_lower:
+                        cat = "SCHEDULE"
+                    elif "directory" in name_lower or "contact" in name_lower:
+                        cat = "DIRECTORY"
+                    elif "search" in name_lower:
+                        cat = "SEARCH"
+                    elif "weather" in name_lower:
+                        cat = "WEATHER"
+                    elif "lms" in name_lower:
+                        cat = "LMS"
+                    elif "inu_ai" in name_lower or "knowledge" in name_lower:
+                        cat = "INU_AI_KNOWLEDGE"
+                    elif "academic" in name_lower:
                         cat = "PORTAL"
+                    else:
+                        cat = "GENERAL"
 
                     tool_instance = McpRemoteTool(
                         name=name,

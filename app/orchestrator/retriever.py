@@ -164,15 +164,20 @@ class SemanticToolRetriever:
         dense_scores = np.dot(self.vectors, query_vec)
 
         # 2. Dynamic Lexical Match against tool metadata (Zero-Hardcoding)
-        q_words = [w.strip() for w in re.findall(r"[a-zA-Z0-9가-힣]+", query.lower()) if len(w.strip()) >= 2]
+        # Extract keywords and de-particle common Korean postpositions
+        raw_words = [w.strip() for w in re.findall(r"[a-zA-Z0-9가-힣]+", query.lower()) if len(w.strip()) >= 2]
+        clean_words = []
+        for w in raw_words:
+            clean = re.sub(r"(에서|으로|로|은|는|이|가|을|를|과|와|의|해줘|알려줘|조회해줘|보여줘)$", "", w)
+            clean_words.append(clean if len(clean) >= 2 else w)
 
         scored_tools = []
         for idx, tool in enumerate(self.tools):
             dense_sim = float(dense_scores[idx])
 
             doc_text = self.tool_lexical_texts[idx]
-            lexical_hits = sum(1 for w in q_words if w in doc_text) if q_words else 0
-            lexical_boost = 0.5 * (lexical_hits / max(len(q_words), 1)) if q_words else 0.0
+            lexical_hits = sum(1 for cw in clean_words if cw in doc_text) if clean_words else 0
+            lexical_boost = 0.5 * (lexical_hits / max(len(clean_words), 1)) if clean_words else 0.0
 
             total_score = dense_sim + lexical_boost
             if total_score >= min_threshold:
@@ -223,15 +228,19 @@ class SemanticToolRetriever:
             query_vec /= norm
 
         dense_scores = np.dot(self.vectors, query_vec)
-        q_words = [w.strip() for w in re.findall(r"[a-zA-Z0-9가-힣]+", query.lower()) if len(w.strip()) >= 2]
+        raw_words = [w.strip() for w in re.findall(r"[a-zA-Z0-9가-힣]+", query.lower()) if len(w.strip()) >= 2]
+        clean_words = []
+        for w in raw_words:
+            clean = re.sub(r"(에서|으로|로|은|는|이|가|을|를|과|와|의|해줘|알려줘|조회해줘|보여줘)$", "", w)
+            clean_words.append(clean if len(clean) >= 2 else w)
 
         scored_tools = []
         for idx, tool in enumerate(self.tools):
             dense_sim = float(dense_scores[idx])
 
             doc_text = self.tool_lexical_texts[idx]
-            lexical_hits = sum(1 for w in q_words if w in doc_text) if q_words else 0
-            lexical_boost = 0.5 * (lexical_hits / max(len(q_words), 1)) if q_words else 0.0
+            lexical_hits = sum(1 for cw in clean_words if cw in doc_text) if clean_words else 0
+            lexical_boost = 0.5 * (lexical_hits / max(len(clean_words), 1)) if clean_words else 0.0
 
             total_score = dense_sim + lexical_boost
             if total_score >= min_threshold:
