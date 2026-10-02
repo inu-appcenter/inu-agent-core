@@ -554,17 +554,26 @@ class AgentOrchestrator:
                         yield (AgentStreamEvent(event_type="CARD", card=card), "", None, None)
                         emitted_cards.add(tool.category)
             else:
+                has_dispatched_action = False
                 if tool.category not in emitted_actions:
                     try:
                         action_instruction = await tool.execute({}, exec_context)
                         if hasattr(action_instruction, "action_id"):
                             yield (AgentStreamEvent(event_type="ACTION_REQUIRED", action=action_instruction), "", None, None)
                             emitted_actions.add(tool.category)
+                            has_dispatched_action = True
                     except Exception as ex:
                         logger.warning(f"Failed to generate client action for {tool.name}: {ex}")
 
-                if tool.category == "PORTAL" and is_portal_linked:
-                    # 계정 연동은 되어 있으나 히든 웹뷰/ERP 응답 지연인 경우
+                # 1. On-demand dynamic Client Action dispatched to client (Coocon P2P scraping)
+                if has_dispatched_action:
+                    summary_out = (
+                        f"\n[{tool.category}_STATUS]: 학생의 모바일 단말기(앱)에 최신 학교 시스템 조회 지침(Action: {tool.name})을 성공적으로 전달했습니다. "
+                        "단말기가 기기 보안 영역을 통해 학교 시스템과 직접 통신하여 최신 데이터를 안전하게 조회하고 있습니다. "
+                        "(⚠️ 중요 지침: 계정 연동 카드를 누르라고 절대 안내하지 마세요! 이미 연동되어 조회가 진행 중이거나 화면에 결과 카드가 표시될 예정임을 친절히 안내하세요.)\n"
+                    )
+                # 2. Portal account linked but ERP response timed out or failed
+                elif tool.category == "PORTAL" and is_portal_linked:
                     err_msg = portal_meta.get("academicErrorMessage") or "포털 또는 ERP 응답을 확인하지 못했습니다."
                     if tool.category not in emitted_cards:
                         fetch_fail_card = CardSynthesizer.synthesize_for_domain(
@@ -581,8 +590,8 @@ class AgentOrchestrator:
                         f"\n[PORTAL_STATUS]: 학생의 포털 계정은 정상 연동되어 있으나, 학교 ERP(종합정보시스템) 응답 지연으로 학적 정보를 일시적으로 불러오지 못했습니다. ({err_msg}) "
                         "학생에게 계정 연동은 잘 유지되어 있으니 잠시 후 같은 질문을 다시 보내달라고 친절하게 안내하세요. (⚠️ 중요 지침: 계정 연동 카드를 다시 누르라고 절대 안내하지 마세요!)\n"
                     )
+                # 3. Portal or LMS genuinely unlinked
                 else:
-                    # 연동 데이터가 없을 때 미연동 안내 카드(PORTAL_AUTH_REQUIRED / LMS_AUTH_REQUIRED)를 즉시 합성하여 전달
                     if tool.category not in emitted_cards:
                         auth_card = CardSynthesizer.synthesize_for_domain(
                             domain=tool.category,

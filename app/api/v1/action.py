@@ -75,7 +75,48 @@ async def report_action_result(report: ClientActionResult) -> Dict[str, Any]:
                 primary_action_label="좌석 현황 보기",
             )
 
-    # 3. 포털 성적/학적 결과
+    # 3. 포털 수강신청 / 시간표 결과
+    elif "timetable" in report.action_id.lower() or (isinstance(data, dict) and ("timetable" in data or "timetableSsv" in data or "courses" in data)):
+        items: List[ListItem] = []
+        raw_courses = []
+        if isinstance(data, list):
+            raw_courses = data
+        elif isinstance(data, dict):
+            raw_courses = data.get("courses") or data.get("items") or data.get("timetable") or []
+
+        for c in raw_courses[:6]:
+            if isinstance(c, dict):
+                c_name = c.get("courseName") or c.get("title") or c.get("subject") or "수강 과목"
+                prof = c.get("professor") or c.get("profNm") or ""
+                room = c.get("classroom") or c.get("room") or c.get("timeRoom") or ""
+                time_slot = c.get("time") or c.get("timeStr") or ""
+                sub_parts = [p for p in [f"교수: {prof}" if prof else "", time_slot, room] if p]
+                items.append(
+                    ListItem(
+                        title=str(c_name),
+                        subtitle=" · ".join(sub_parts) if sub_parts else "수강신청 과목",
+                        tag="공식수강",
+                        link="/timetable",
+                    )
+                )
+
+        if not items:
+            items.append(
+                ListItem(
+                    title="수강신청 내역 확인 완료",
+                    subtitle="이번 학기 공식 수강신청 내역이 정상 연동되었습니다.",
+                    tag="포털연동",
+                    link="/timetable",
+                )
+            )
+
+        card = ListCard(
+            title="📋 학교 포털 수강신청 시간표",
+            items=items,
+            footer_text="학교 종합정보시스템(ERP) 공식 수강신청 데이터입니다.",
+        )
+
+    # 4. 포털 성적/학적 결과
     elif "portal" in report.action_id.lower() or "grade" in report.action_id.lower():
         sub_details: List[MetricCardItem] = []
         if isinstance(data, dict):
@@ -89,7 +130,7 @@ async def report_action_result(report: ClientActionResult) -> Dict[str, Any]:
             sub_details=sub_details,
         )
 
-    # 4. 기본 Fallback 카드
+    # 5. 기본 Fallback 카드
     else:
         card = ListCard(
             title="외부 시스템 연동 완료",
