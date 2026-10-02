@@ -35,10 +35,14 @@ class ActionRule(BaseModel):
     action_id: str = Field(..., description="Unique action identifier e.g. LMS_GET_ASSIGNMENTS")
     domain: Literal["LMS", "LIBRARY", "PORTAL", "DORM", "GENERAL"]
     protocol: Literal["HTTP_REST", "NEXACRO_SSV", "HTML_SCRAPE"] = "HTTP_REST"
+    action_type: Literal["QUERY", "MUTATION", "DOWNLOAD"] = "QUERY"
+    requires_confirmation: bool = False
+    confirmation_message: Optional[str] = None
     title: str
     description: str
     version: str = "1.0.0"
     target: RuleTarget
     extraction: Optional[RuleExtraction] = None
     privacy: PrivacyPolicy = Field(default_factory=PrivacyPolicy)
+    download_metadata: Optional[Dict[str, str]] = None
     default_card_type: Literal["METRIC_CARD", "STATUS_CARD", "LIST_CARD", "ACTION_CARD"] = "LIST_CARD"

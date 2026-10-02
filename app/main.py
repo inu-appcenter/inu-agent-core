@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.logging import setup_logging, logger
 from app.api.v1.router import api_v1_router
+from app.mcp.server import router as mcp_router
 from app.tools.registry import tool_registry
 from app.orchestrator.retriever import tool_retriever
 
@@ -53,6 +54,7 @@ app.add_middleware(
 
 # Include API Routers
 app.include_router(api_v1_router, prefix="/api")
+app.include_router(mcp_router)
 
 
 @app.get("/", summary="Root index")

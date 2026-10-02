@@ -46,10 +46,14 @@ class ClientActionRequest(BaseModel):
 
 class ClientActionInstruction(BaseModel):
     action_id: str
-    auth_domain: Literal["LIBRARY", "PORTAL", "LMS", "NONE"]
+    auth_domain: Literal["LIBRARY", "PORTAL", "LMS", "DORM", "NONE"]
     protocol: Literal["HTTP_REST", "NEXACRO_SSV"] = "HTTP_REST"
+    action_type: Literal["QUERY", "MUTATION", "DOWNLOAD"] = "QUERY"
+    requires_confirmation: bool = False
+    confirmation_message: Optional[str] = None
     request: ClientActionRequest
     extraction_rules: Optional[Dict[str, Any]] = None
+    download_metadata: Optional[Dict[str, str]] = None
 
 
 class ClientActionResult(BaseModel):

@@ -57,8 +57,12 @@ class ClientActionTool(BaseTool):
 
         return ClientActionInstruction(
             action_id=unique_action_id,
-            auth_domain=self.rule.domain,
-            protocol=self.rule.protocol,
+            auth_domain="PORTAL" if self.rule.domain in ["PORTAL", "DORM"] else self.rule.domain,
+            protocol="NEXACRO_SSV" if self.rule.protocol == "NEXACRO_SSV" else "HTTP_REST",
+            action_type=getattr(self.rule, "action_type", "QUERY"),
+            requires_confirmation=getattr(self.rule, "requires_confirmation", False),
+            confirmation_message=getattr(self.rule, "confirmation_message", None),
+            download_metadata=getattr(self.rule, "download_metadata", None),
             request=ClientActionRequest(
                 url=self.rule.target.url,
                 method=self.rule.target.method,
