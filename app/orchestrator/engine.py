@@ -14,7 +14,7 @@ from app.core.anonymizer import (
     build_anonymized_academic_summary,
 )
 from app.llm.client import llm_client
-from app.llm.schemas import ChatRequest, AgentStreamEvent
+from app.llm.schemas import ChatRequest, AgentStreamEvent, ChatActionCallbackRequest
 from app.orchestrator.prompts import (
     get_tool_orchestration_prompt,
     get_system_prompt_for_client,
@@ -448,7 +448,24 @@ class AgentOrchestrator:
                 yield AgentStreamEvent(event_type="DONE")
                 return
 
-        # Case 2: Composite Query or General Campus Tools -> Synthesis LLM
+        # Case 2: On-Demand P2P Action Dispatched -> Complete first stream and await Client Callback
+        if emitted_actions:
+            first_action_cat = list(emitted_actions)[0]
+            logger.info(
+                f"[WAITING_FOR_ACTION_CALLBACK] query='{request.message[:40]}' "
+                f"actions={list(emitted_actions)}. Pausing stream for client callback."
+            )
+            yield AgentStreamEvent(
+                event_type="STATUS",
+                status_id="p2p_action_waiting",
+                status_title="단말기 보안 영역에서 학교 공식 시스템 데이터를 안전하게 확인 중입니다...",
+                status_category=first_action_cat,
+                status_state="running",
+            )
+            yield AgentStreamEvent(event_type="DONE")
+            return
+
+        # Case 3: Composite Query or General Campus Tools -> Synthesis LLM
         additional_guideline = ""
         if has_inuchat:
             additional_guideline = (
@@ -687,9 +704,12 @@ class AgentOrchestrator:
                     try:
                         action_instruction = await tool.execute({}, exec_context)
                         if hasattr(action_instruction, "action_id"):
+                            if getattr(request, "session_id", None):
+                                action_instruction.session_id = request.session_id
                             logger.info(
                                 f"[ACTION_DISPATCHED] action_id={action_instruction.action_id} domain={action_instruction.auth_domain} "
-                                f"target={action_instruction.request.url if action_instruction.request else 'none'}"
+                                f"target={action_instruction.request.url if action_instruction.request else 'none'} "
+                                f"session_id={action_instruction.session_id}"
                             )
                             yield (AgentStreamEvent(event_type="ACTION_REQUIRED", action=action_instruction), "", None, None)
                             emitted_actions.add(action_category)
@@ -1301,6 +1321,215 @@ class AgentOrchestrator:
                 None,
                 rag_data_out,
             )
+
+    async def resume_stream_with_action_result(
+        self,
+        callback: ChatActionCallbackRequest,
+    ) -> AsyncGenerator[AgentStreamEvent, None]:
+        """
+        Resumes the conversation stream after the client executes an on-demand P2P action.
+        Synthesizes the actual SDUI card, chains secondary tools if needed (e.g., professor contact search),
+        and streams the final synthesized answer.
+        """
+        logger.info(
+            f"[ACTION_RESUME_START] action_id={callback.action_id} "
+            f"success={callback.success} session_id={callback.session_id} "
+            f"query='{(callback.original_message or '')[:40]}'"
+        )
+
+        act_id_lower = callback.action_id.lower()
+        if any(kw in act_id_lower for kw in ["timetable", "sreg", "tlsn"]):
+            domain = "TIMETABLE"
+        elif any(kw in act_id_lower for kw in ["lms", "assign", "course"]):
+            domain = "LMS"
+        elif any(kw in act_id_lower for kw in ["library", "lib", "seat"]):
+            domain = "LIBRARY"
+        else:
+            domain = "PORTAL"
+
+        # 1. Action execution failed on client/device
+        if not callback.success:
+            err_msg = callback.error_message or "학교 공식 시스템 연동 중 일시적인 오류가 발생했습니다."
+            logger.warning(f"[ACTION_RESUME_FAILED] action_id={callback.action_id} error={err_msg}")
+
+            yield AgentStreamEvent(
+                event_type="STATUS",
+                status_id="action_resume_fail",
+                status_title="학교 시스템 조회 실패",
+                status_category=domain,
+                status_state="failed",
+            )
+
+            fail_card = CardSynthesizer.synthesize_for_domain(
+                domain=domain,
+                data={"status": "FETCH_FAILED", "message": err_msg},
+                query=callback.original_message or "",
+            )
+            if fail_card:
+                yield AgentStreamEvent(event_type="CARD", card=fail_card)
+
+            yield AgentStreamEvent(
+                event_type="TOKEN",
+                content=f"학교 시스템(ERP/포털) 연동 중 오류가 발생했습니다: {err_msg}\n잠시 후 다시 시도해 주세요.",
+            )
+            yield AgentStreamEvent(event_type="DONE")
+            return
+
+        # 2. Action execution succeeded -> Synthesize Card & Grounding
+        yield AgentStreamEvent(
+            event_type="STATUS",
+            status_id="action_resume_success",
+            status_title="학교 공식 시스템 데이터 연동 완료! 최종 답변을 정리합니다.",
+            status_category=domain,
+            status_state="completed",
+        )
+
+        data = callback.data or {}
+        card = CardSynthesizer.synthesize_for_domain(
+            domain=domain,
+            data=data,
+            query=callback.original_message or "",
+        )
+        if card:
+            yield AgentStreamEvent(event_type="CARD", card=card)
+
+        # Build domain summary for LLM grounding
+        tool_summary_lines: List[str] = []
+        advisor_name: Optional[str] = None
+
+        if domain == "TIMETABLE":
+            tool_summary_lines.append("\n[학교 포털 수강신청 시간표 공식 데이터]:")
+            raw_courses = data if isinstance(data, list) else (
+                data.get("courses") or data.get("items") or data.get("timetable") or []
+            ) if isinstance(data, dict) else []
+
+            if raw_courses:
+                for idx, c in enumerate(raw_courses):
+                    if isinstance(c, dict):
+                        c_name = c.get("courseName") or c.get("title") or c.get("subject") or "과목"
+                        prof = c.get("professor") or c.get("profNm") or "미지정"
+                        time_str = c.get("time") or c.get("classTime") or c.get("timeStr") or "시간미정"
+                        room = c.get("classroom") or c.get("room") or c.get("timeRoom") or "강의실미정"
+                        tool_summary_lines.append(f"- {c_name}: 담당교수={prof}, 시간={time_str}, 강의실={room}")
+            else:
+                tool_summary_lines.append("- 이번 학기 등록된 수강신청 내역이 없습니다.")
+
+        elif domain == "PORTAL":
+            tool_summary_lines.append("\n[학교 종합정보시스템(ERP) 학적 기본 데이터]:")
+            if isinstance(data, dict):
+                advisor_name = data.get("advisorProfessorName") or data.get("advisor") or data.get("profNm")
+                std_nm = data.get("studentName") or data.get("name") or "학생"
+                std_no = data.get("studentId") or data.get("stdNo") or ""
+                dept = data.get("department") or data.get("dept") or ""
+                status = data.get("academicStatus") or data.get("status") or "재학"
+                credits = data.get("earnedCredits") or data.get("credits") or ""
+                gpa = data.get("gradeAverage") or data.get("gpa") or ""
+
+                if std_nm: tool_summary_lines.append(f"- 성명: {std_nm}")
+                if std_no: tool_summary_lines.append(f"- 학번: {std_no}")
+                if dept: tool_summary_lines.append(f"- 소속: {dept}")
+                if status: tool_summary_lines.append(f"- 학적상태: {status}")
+                if credits: tool_summary_lines.append(f"- 취득학점: {credits}학점")
+                if gpa: tool_summary_lines.append(f"- 평점평균: {gpa}")
+                if advisor_name: tool_summary_lines.append(f"- 지도교수: {advisor_name} 교수님")
+            else:
+                tool_summary_lines.append(f"- 데이터: {str(data)}")
+
+        elif domain == "LMS":
+            tool_summary_lines.append("\n[이러닝(LMS) 과제 및 강의 데이터]:")
+            events = data.get("events", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+            for ev in events[:5]:
+                if isinstance(ev, dict):
+                    ev_name = ev.get("name") or ev.get("fullname") or "과제"
+                    tool_summary_lines.append(f"- 과제/일정: {ev_name}")
+
+        orig_query = callback.original_message or ""
+        is_contact_query = any(kw in orig_query for kw in ["연락처", "전화번호", "연구실", "번호", "이메일", "교수님", "과사", "사무실"])
+
+        # 3. Multi-Hop Chaining: Contact query + Advisor Professor found
+        if is_contact_query and advisor_name:
+            logger.info(f"[MULTI_HOP_CHAIN] Chaining to api_directory for advisor '{advisor_name}'")
+            yield AgentStreamEvent(
+                event_type="STATUS",
+                status_id="contact_chain_search",
+                status_title=f"{advisor_name} 교수님 교내 연락처 및 연구실 조회 중...",
+                status_category="DIRECTORY",
+                status_state="running",
+            )
+
+            dir_tool = tool_registry.get_tool("api_directory")
+            if dir_tool:
+                try:
+                    dir_res = await dir_tool.execute(
+                        {"query": advisor_name},
+                        {"client": callback.client, "auth": "", "authorization": "", "query": advisor_name},
+                    )
+                    dir_card = CardSynthesizer.synthesize_for_domain(
+                        domain="DIRECTORY",
+                        tool_name="api_directory",
+                        data=dir_res,
+                        query=orig_query,
+                    )
+                    if dir_card:
+                        yield AgentStreamEvent(event_type="CARD", card=dir_card)
+
+                    contacts = dir_res if isinstance(dir_res, list) else (
+                        dir_res.get("contacts") or dir_res.get("data") or []
+                    ) if isinstance(dir_res, dict) else []
+
+                    tool_summary_lines.append(f"\n[교내 전화번호부 {advisor_name} 교수님 연락처 검색 결과]:")
+                    if contacts:
+                        for c in contacts[:3]:
+                            if isinstance(c, dict):
+                                c_name = c.get("name") or advisor_name
+                                c_dept = c.get("dept") or c.get("department") or ""
+                                c_tel = c.get("telephone") or c.get("phone") or c.get("tel") or "전화번호 없음"
+                                c_email = c.get("email") or ""
+                                c_loc = c.get("location") or c.get("room") or ""
+                                tool_summary_lines.append(
+                                    f"- {c_name} ({c_dept}): 전화={c_tel}, 이메일={c_email}, 위치={c_loc}"
+                                )
+                    else:
+                        tool_summary_lines.append(f"- {advisor_name} 교수님의 공식 등록 연락처를 찾지 못했습니다.")
+
+                    yield AgentStreamEvent(
+                        event_type="STATUS",
+                        status_id="contact_chain_search",
+                        status_title=f"{advisor_name} 교수님 연락처 확인 완료",
+                        status_category="DIRECTORY",
+                        status_state="completed",
+                    )
+                except Exception as ex:
+                    logger.warning(f"Error running chained api_directory: {ex}")
+
+        # 4. Final LLM Response Synthesis Stream
+        tool_summary_text = "\n".join(tool_summary_lines)
+        system_prompt = get_system_prompt_for_client(callback.client, tool_summary=tool_summary_text)
+
+        synthesis_messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": system_prompt}
+        ]
+
+        if callback.history:
+            for h in callback.history[-6:]:
+                role = getattr(h, "role", None) or (h.get("role") if isinstance(h, dict) else "user")
+                content = getattr(h, "content", None) or (h.get("content") if isinstance(h, dict) else "")
+                if content:
+                    clean_role = "assistant" if role == "assistant" else "user"
+                    synthesis_messages.append({"role": clean_role, "content": content})
+
+        synthesis_messages.append({
+            "role": "user",
+            "content": orig_query or "학교 시스템에서 조회된 내역을 친절하게 안내해줘."
+        })
+
+        try:
+            async for token in llm_client.stream_chat(messages=synthesis_messages):
+                yield AgentStreamEvent(event_type="TOKEN", content=token)
+            yield AgentStreamEvent(event_type="DONE")
+        except Exception as e:
+            logger.error(f"[ACTION_RESUME_ERROR] Synthesis error: {e}", exc_info=True)
+            yield AgentStreamEvent(event_type="ERROR", error=str(e))
 
 
 orchestrator = AgentOrchestrator()

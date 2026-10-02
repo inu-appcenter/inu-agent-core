@@ -19,6 +19,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., description="User prompt or query")
     history: List[ChatMessage] = Field(default_factory=list, description="Recent conversation history")
+    session_id: Optional[str] = Field(default=None, description="Client chat session ID for multi-turn callbacks")
     client: Literal["INTIP", "UNIDORM", "WEB"] = Field(default="INTIP", description="Originating client platform")
     client_context: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -46,6 +47,7 @@ class ClientActionRequest(BaseModel):
 
 class ClientActionInstruction(BaseModel):
     action_id: str
+    session_id: Optional[str] = None
     auth_domain: Literal["LIBRARY", "PORTAL", "LMS", "DORM", "NONE"]
     protocol: Literal["HTTP_REST", "NEXACRO_SSV"] = "HTTP_REST"
     action_type: Literal["QUERY", "MUTATION", "DOWNLOAD"] = "QUERY"
@@ -58,11 +60,30 @@ class ClientActionInstruction(BaseModel):
 
 class ClientActionResult(BaseModel):
     action_id: str
+    session_id: Optional[str] = None
     success: bool
     status_code: Optional[int] = None
     data: Optional[Any] = None
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+
+
+class ChatActionCallbackRequest(BaseModel):
+    action_id: str
+    session_id: Optional[str] = None
+    success: bool
+    data: Optional[Any] = None
+    error_message: Optional[str] = None
+    error_code: Optional[str] = None
+    original_message: Optional[str] = Field(default="", description="Original user prompt to complete ReAct synthesis")
+    client: Literal["INTIP", "UNIDORM", "WEB"] = Field(default="INTIP", description="Client tenant")
+    client_context: Optional[Dict[str, Any]] = Field(default=None, alias="clientContext")
+    history: List[ChatMessage] = Field(default_factory=list, description="Conversation history")
+
+    model_config = {
+        "populate_by_name": True,
+        "extra": "ignore",
+    }
 
 
 # -----------------------------------------------------------------------------
