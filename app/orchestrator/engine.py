@@ -228,8 +228,30 @@ class AgentOrchestrator:
                 )
 
             if not tool_calls:
-                # No more tools needed, proceed to final response
-                break
+                # Deterministic Multi-Hop: 지도교수 연락처 질의 시 학적 조회 후 api_directory 미실행 상태면 자동 연쇄 호출
+                is_contact_query = any(kw in request.message for kw in ["연락처", "전화번호", "연구실", "번호", "이메일", "교수님", "과사", "사무실"])
+                advisor_name = academic_data_dict.get("advisor") or academic_data_dict.get("advisorProfessorName")
+                if not advisor_name and request.client_context:
+                    acad_disp = request.client_context.get("academicDisplay")
+                    if isinstance(acad_disp, dict):
+                        advisor_name = acad_disp.get("advisorProfessorName") or acad_disp.get("profNm")
+
+                if is_contact_query and advisor_name and "DIRECTORY" not in executed_categories and "api_directory" not in executed_tool_names:
+                    logger.info(f"Deterministic Multi-Hop: Chaining to api_directory for advisor '{advisor_name}'")
+                    dir_tool = tool_registry.get_tool("api_directory")
+                    if dir_tool:
+                        from uuid import uuid4
+                        tool_calls = [{
+                            "id": f"call_auto_dir_{uuid4().hex[:6]}",
+                            "type": "function",
+                            "function": {
+                                "name": "api_directory",
+                                "arguments": {"query": advisor_name},
+                            }
+                        }]
+                else:
+                    # No more tools needed, proceed to final response
+                    break
 
             # Deduplication & Loop Prevention Guardrail:
             # 1. Check if all proposed tool calls in this hop are identical repeats of already executed calls

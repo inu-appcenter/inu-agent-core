@@ -40,6 +40,12 @@ class ToolRegistry:
             t_clean = t_name.replace("api_", "").replace("action_", "").replace("-", "_").lower()
             if t_clean == clean_name:
                 return t
+
+        # Contact / Directory alias mapping (api_searchContacts -> api_directory)
+        if "contact" in clean_name or "directory" in clean_name:
+            for t_name, t in self._tools.items():
+                if "directory" in t_name.lower():
+                    return t
         return None
 
     def get_tools_by_category(self, category: str) -> List[BaseTool]:
