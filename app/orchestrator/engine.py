@@ -164,6 +164,7 @@ class AgentOrchestrator:
         inuchat_rag_data = None
         executed_tool_signatures = set()
         successful_search_queries = set()
+        failed_tool_categories: Dict[str, str] = {}
 
         # 3. Native Tool Calling ReAct Loop (Autonomous Multi-Hop with Streaming Thought)
         MAX_HOPS = 4
@@ -256,6 +257,27 @@ class AgentOrchestrator:
                                 "arguments": {"query": advisor_name},
                             }
                         }]
+                elif "SEARCH" in failed_tool_categories and "NOTICE" not in executed_categories and "api_notice" not in executed_tool_names:
+                    search_query = failed_tool_categories.get("SEARCH") or request.message
+                    logger.info(f"Deterministic Multi-Hop: Chaining from failed SEARCH to api_notice for query '{search_query}'")
+                    notice_tool = tool_registry.get_tool("api_notice") or tool_registry.get_tool("notice") or tool_registry.get_tool("action_portal_search_notices")
+                    if notice_tool:
+                        clean_q = AgentRouter._clean_entity_query(search_query) or search_query
+                        yield AgentStreamEvent(
+                            event_type="THINKING",
+                            thinking=f"통합 검색 서버 응답 지연으로 인해, 학교 공지사항 검색({notice_tool.name})을 통해 '{clean_q}' 관련 정보를 대체 조회합니다.",
+                        )
+                        from uuid import uuid4
+                        tool_calls = [{
+                            "id": f"call_auto_notice_{uuid4().hex[:6]}",
+                            "type": "function",
+                            "function": {
+                                "name": notice_tool.name,
+                                "arguments": {"query": clean_q},
+                            }
+                        }]
+                    else:
+                        break
                 else:
                     # No more tools needed, proceed to final response
                     break
@@ -367,6 +389,9 @@ class AgentOrchestrator:
                 ):
                     if event:
                         yield event
+                        if getattr(event, "event_type", None) == "STATUS" and getattr(event, "status_state", None) == "failed":
+                            q_val = fn_args.get("query") or fn_args.get("q") or request.message
+                            failed_tool_categories[target_tool.category.upper()] = str(q_val)
                     if summary:
                         tool_summary_text += summary
                         tool_obs += summary
@@ -1374,6 +1399,7 @@ class AgentOrchestrator:
                             s_data = res.get("rawData") if isinstance(res.get("rawData"), dict) else res
                             total_cnt = s_data.get("totalCount", 0)
                             q_val = s_data.get("query", final_args.get("query", ""))
+                            mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
                             lines = [f"\n[인천대학교 통합 검색 결과 (검색어: '{q_val}', 총 {total_cnt}건)]:"]
 
                             notices = s_data.get("notices", {}).get("items", []) if isinstance(s_data.get("notices"), dict) else []
@@ -1445,13 +1471,13 @@ class AgentOrchestrator:
                                 for p in posts[:3]:
                                     lines.append(f"  • {p.get('title')} ({p.get('board')}, 추천: {p.get('likeCount')})")
 
-                            mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
                             if "오류가 발생했습니다" in mcp_summary:
                                 status_state = "failed"
                                 status_title = f"{tool_display_name} 조회 실패"
                                 summary_out = (
                                     f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 서버 응답 오류가 발생했습니다.\n"
-                                    f"⚠️ 핵심 응답 지침: 절대로 가상 정보를 지어내지 말고, '현재 교내 시스템 일시 오류로 통합 검색 결과를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
+                                    f"💡 [자율 대체 검색 지침]: 통합 검색 엔진(Elasticsearch)이 일시 장애 상태입니다. "
+                                    f"사용자가 찾고자 하는 정보('{q_val}')를 제공하기 위해, 즉시 학교 공지사항 검색 도구(`api_notice`)를 호출하여 공지사항에서 정보를 찾아 안내하세요.\n"
                                 )
                             elif total_cnt == 0:
                                 status_state = "empty"
