@@ -96,7 +96,7 @@ def build_anonymized_academic_summary(clean_record: Dict[str, Any]) -> str:
 
     advisor_hint = ""
     if advisor:
-        advisor_hint = f"- 지도교수: {advisor} 교수님 (교수님의 연락처/전화번호/연구실 조회가 필요한 경우 반드시 다음 홉에서 `api_directory(query='{advisor}')` 도구를 호출하세요.)\n"
+        advisor_hint = f"- 지도교수: {advisor} 교수님\n"
 
     dept_label = f"{colg} {dept}".strip() if colg else dept
 

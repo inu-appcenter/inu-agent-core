@@ -240,6 +240,10 @@ class AgentOrchestrator:
                     logger.info(f"Deterministic Multi-Hop: Chaining to api_directory for advisor '{advisor_name}'")
                     dir_tool = tool_registry.get_tool("api_directory")
                     if dir_tool:
+                        yield AgentStreamEvent(
+                            event_type="THINKING",
+                            thinking=f"학적 정보에서 확인된 지도교수({advisor_name} 교수님)의 연락처 및 연구실 정보를 확인하기 위해 교내 전화번호부(api_directory)를 조회합니다.",
+                        )
                         from uuid import uuid4
                         tool_calls = [{
                             "id": f"call_auto_dir_{uuid4().hex[:6]}",
@@ -388,6 +392,12 @@ class AgentOrchestrator:
                     "name": fn_name,
                     "content": tool_obs,
                 })
+
+            # If a contact query has now executed api_directory / DIRECTORY, all required multi-hop information is gathered.
+            is_contact_query = any(kw in request.message for kw in ["연락처", "전화번호", "전화", "연구실", "번호", "이메일", "메일", "교수님", "교수", "담임교수", "지도교수", "과사", "사무실", "찾아줘"])
+            if is_contact_query and ("DIRECTORY" in executed_categories or "api_directory" in executed_tool_names):
+                logger.info("Multi-hop contact lookup complete (Portal + Directory). Proceeding directly to synthesis.")
+                break
 
         # 4. Response Streaming Strategy
         # Case 1: Pure Academic Regulation / Graduation query -> INUChat Direct Pass-through
@@ -1079,6 +1089,7 @@ class AgentOrchestrator:
                             entries = raw_list
                             lines = [f"\n[교내 교수/교직원/부서 연락처 검색 결과 (검색어: '{q_param}')]:"]
                             if entries:
+                                status_title = f"{q_param} 교수님 연락처 확인 완료" if q_param and not q_param.endswith("과") else f"{tool_display_name} 확인 완료"
                                 for e in entries[:5]:
                                     if isinstance(e, dict):
                                         name = e.get("name") or ""
@@ -1088,8 +1099,10 @@ class AgentOrchestrator:
                                         email = e.get("email") or ""
                                         lines.append(f"- {name} ({pos}, {affil}): 📞 {phone}" + (f", ✉️ {email}" if email else ""))
                             else:
-                                status_title = f"{tool_display_name} 결과 없음"
+                                status_title = f"{q_param} 교수님 연락처 결과 없음" if q_param and not q_param.endswith("과") else f"{tool_display_name} 결과 없음"
                                 lines.append(f"- 검색어 '{q_param}' 관련 교수/교직원 개인 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다.")
+                                lines.append(f"⚠️ 핵심 응답 지침: 교내 전화번호부 검색 결과 '{q_param}' 교수님의 개인 연락처가 등록되어 있지 않습니다. 절대로 '조회 중입니다', '잠시만 기다려 주세요', '조회를 진행하겠습니다'라는 미완료/진행형 표현을 사용하지 마세요! 조회가 이미 완료되었으며 개인 연구실 번호가 미등록된 상태임을 사실대로 안내하고, 소속 학과 사무실(과사)로 문의하여 안내받도록 답변을 완결하세요.")
+                            summary_out = "\n".join(lines) + "\n"
                     elif tool.category == "SCHEDULE":
                         tool_data = res
                         sched_list = []
