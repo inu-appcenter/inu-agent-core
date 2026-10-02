@@ -899,6 +899,82 @@ class AgentOrchestrator:
                     "tabName": tab_name,
                 }
 
+            # Middleware: Cafeteria argument normalization
+            if tool.category == "CAFETERIA":
+                # 1. mealType normalization
+                raw_meal = str(final_args.get("mealType") or "").strip().upper()
+                if raw_meal in ["점심", "중식", "LUNCH"]:
+                    final_args["mealType"] = "LUNCH"
+                elif raw_meal in ["아침", "조식", "BREAKFAST"]:
+                    final_args["mealType"] = "BREAKFAST"
+                elif raw_meal in ["저녁", "석식", "DINNER"]:
+                    final_args["mealType"] = "DINNER"
+                elif raw_meal in ["전체", "ALL", "자동", "AUTO"]:
+                    final_args["mealType"] = "AUTO"
+                elif raw_meal:
+                    final_args["mealType"] = "AUTO"
+
+                # 2. cafeteria name normalization
+                raw_caf = str(final_args.get("cafeteria") or "").strip()
+                caf_mapping = {
+                    "학식": "학생식당",
+                    "학생식당": "학생식당",
+                    "제1학생식당": "학생식당",
+                    "1학식": "학생식당",
+                    "1기숙사": "제1기숙사식당",
+                    "제1기숙사": "제1기숙사식당",
+                    "제1기숙사식당": "제1기숙사식당",
+                    "1긱": "제1기숙사식당",
+                    "2기숙사": "2기숙사 식당",
+                    "2기숙사 식당": "2기숙사 식당",
+                    "제2기숙사": "2기숙사 식당",
+                    "2긱": "2기숙사 식당",
+                    "2호관": "2호관(교직원)식당",
+                    "교직원": "2호관(교직원)식당",
+                    "교직원식당": "2호관(교직원)식당",
+                    "2호관(교직원)식당": "2호관(교직원)식당",
+                    "27호관": "27호관식당",
+                    "27호관식당": "27호관식당",
+                    "이공계": "27호관식당",
+                    "이공계식당": "27호관식당",
+                    "사범대": "사범대식당",
+                    "사범대식당": "사범대식당",
+                    "전체": "전체",
+                    "all": "전체",
+                    "ALL": "전체",
+                }
+                if raw_caf in caf_mapping:
+                    final_args["cafeteria"] = caf_mapping[raw_caf]
+                elif raw_caf and raw_caf not in ["전체", "학생식당", "제1기숙사식당", "2기숙사 식당", "2호관(교직원)식당", "27호관식당", "사범대식당"]:
+                    final_args["cafeteria"] = "전체"
+
+                # 3. day normalization
+                raw_day = final_args.get("day")
+                if raw_day is not None:
+                    if str(raw_day).strip().upper() in ["TODAY", "오늘"]:
+                        final_args["day"] = datetime.now(timezone(timedelta(hours=9))).weekday() + 1
+                    else:
+                        try:
+                            d_int = int(raw_day)
+                            if 1 <= d_int <= 7:
+                                final_args["day"] = d_int
+                            else:
+                                final_args["day"] = datetime.now(timezone(timedelta(hours=9))).weekday() + 1
+                        except (ValueError, TypeError):
+                            final_args["day"] = datetime.now(timezone(timedelta(hours=9))).weekday() + 1
+
+            # Middleware: Timetable gap argument normalization
+            if tool.category == "TIMETABLE_GAP":
+                raw_day = final_args.get("day")
+                if raw_day is not None:
+                    if str(raw_day).strip().upper() in ["TODAY", "오늘"]:
+                        final_args["day"] = datetime.now(timezone(timedelta(hours=9))).weekday() + 1
+                    else:
+                        try:
+                            final_args["day"] = int(raw_day)
+                        except (ValueError, TypeError):
+                            final_args.pop("day", None)
+
             status_state = "completed"
             status_title = f"{tool_display_name} 확인 완료"
 
@@ -1024,15 +1100,27 @@ class AgentOrchestrator:
                                             lines.append(f"- {prefix}{corner}: {menu_str}")
 
                         if not has_valid_menu and mcp_summary:
-                            has_valid_menu = True
-                            lines.append(f"\n{mcp_summary}")
+                            if "올바르지 않습니다" in mcp_summary or "오류가 발생했습니다" in mcp_summary or "에러" in mcp_summary:
+                                status_state = "failed"
+                                status_title = f"{tool_display_name} 조회 실패"
+                                summary_out = (
+                                    f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 서버 파라미터 오류가 발생했습니다.\n"
+                                    f"⚠️ 핵심 지침: 학생에게 현재 식단 정보를 불러오는 중 일시적 오류가 발생했음을 사실대로 안내하세요.\n"
+                                )
+                            elif any(k in mcp_summary for k in ["쉽니다", "운영하지 않습니다", "정보가 없습니다", "등록된 식단이 없습니다", "식단 없음", "운영 없음"]):
+                                status_state = "empty"
+                                status_title = f"{tool_display_name} 결과 없음"
+                                summary_out = f"\n[CAFETERIA {caf_name} 식단 안내]:\n{mcp_summary}\n"
+                            else:
+                                has_valid_menu = True
+                                lines.append(f"\n{mcp_summary}")
 
                         if has_valid_menu:
                             status_state = "completed"
                             status_title = f"{tool_display_name} 확인 완료"
                             lines.append("\n⚠️ 핵심 지침: 반드시 위 실제 조회된 메뉴 목록에 근거하여 안내하세요. 위 목록에 없는 가상의 메뉴를 절대로 추가하거나 지어내지 마세요.")
                             summary_out = "\n".join(lines) + "\n"
-                        else:
+                        elif status_state != "failed":
                             status_state = "empty"
                             status_title = f"{tool_display_name} 결과 없음"
                             summary_out = (
