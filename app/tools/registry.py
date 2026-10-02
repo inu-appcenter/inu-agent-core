@@ -21,6 +21,7 @@ from app.tools.notification_tools import (
     NoticeKeywordTool,
     MySettingsTool,
 )
+from app.tools.mcp_connector import McpConnector, McpRemoteTool
 
 class ToolRegistry:
     def __init__(self):
@@ -67,9 +68,22 @@ class ToolRegistry:
 
     async def sync_inu_portal_tools(self) -> int:
         """
-        Synchronize tools from inu-portal-server /v3/api-docs.
-        If the server is unavailable, load fallback sample schema.
+        Synchronize tools from inu-portal-server.
+        Tries remote MCP (Model Context Protocol /mcp) first, and falls back to OpenAPI /v3/api-docs if unreachable.
         """
+        # 1. Try modern MCP Server first
+        try:
+            mcp_connector = McpConnector()
+            mcp_tools = await mcp_connector.fetch_tools()
+            if mcp_tools:
+                for tool in mcp_tools:
+                    self.register(tool)
+                logger.info(f"Successfully mounted {len(mcp_tools)} tools from INU Portal MCP server")
+                return len(mcp_tools)
+        except Exception as e:
+            logger.warning(f"Failed to sync tools via MCP: {e}. Falling back to OpenAPI...")
+
+        # 2. Fallback to OpenAPI Connector
         connector = OpenApiConnector()
         spec = await connector.fetch_spec()
 
