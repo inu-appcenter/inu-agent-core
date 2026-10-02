@@ -57,3 +57,22 @@ def test_schema_coercer_boolean():
     assert SchemaCoercer.coerce(schema, {"enabled": "true"})["enabled"] is True
     assert SchemaCoercer.coerce(schema, {"enabled": "false"})["enabled"] is False
     assert SchemaCoercer.coerce(schema, {"enabled": "yes"})["enabled"] is True
+
+def test_schema_coercer_parameter_aliases():
+    # 1. Tool expecting 'q', caller passes 'query'
+    schema_q = {
+        "properties": {
+            "q": {"type": "string"}
+        }
+    }
+    assert SchemaCoercer.coerce(schema_q, {"query": "수강신청"}) == {"q": "수강신청"}
+    assert SchemaCoercer.coerce(schema_q, {"keyword": "장학"}) == {"q": "장학"}
+
+    # 2. Tool expecting 'query', caller passes 'q'
+    schema_query = {
+        "properties": {
+            "query": {"type": "string"}
+        }
+    }
+    assert SchemaCoercer.coerce(schema_query, {"q": "수강신청"}) == {"query": "수강신청"}
+

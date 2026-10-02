@@ -45,6 +45,18 @@ class SchemaCoercer:
 
         coerced = dict(args)
 
+        # 0. Parameter Alias Coercion (e.g. query <-> q)
+        if "q" in properties and "q" not in coerced:
+            for alias in ["query", "keyword", "searchWord", "searchTerm", "search"]:
+                if alias in coerced:
+                    coerced["q"] = coerced.pop(alias)
+                    break
+        elif "query" in properties and "query" not in coerced:
+            for alias in ["q", "keyword", "searchWord", "searchTerm", "search"]:
+                if alias in coerced:
+                    coerced["query"] = coerced.pop(alias)
+                    break
+
         for param, prop in properties.items():
             if param not in coerced:
                 continue

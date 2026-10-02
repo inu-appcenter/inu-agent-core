@@ -1337,8 +1337,12 @@ class AgentOrchestrator:
                         tool_data = res
                         if isinstance(res, dict):
                             s_data = res.get("rawData") if isinstance(res.get("rawData"), dict) else res
+                            if isinstance(s_data, dict) and "items" in s_data and isinstance(s_data["items"], list) and s_data["items"]:
+                                first_item = s_data["items"][0]
+                                if isinstance(first_item, dict) and any(k in first_item for k in ["notices", "schedules", "directory", "departmentNotices"]):
+                                    s_data = first_item
                             total_cnt = s_data.get("totalCount", 0)
-                            q_val = s_data.get("query", final_args.get("query", ""))
+                            q_val = s_data.get("query") or s_data.get("q") or final_args.get("q") or final_args.get("query", "")
                             mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
                             lines = [f"\n[인천대학교 통합 검색 결과 (검색어: '{q_val}', 총 {total_cnt}건)]:"]
 

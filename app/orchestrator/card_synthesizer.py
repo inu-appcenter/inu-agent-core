@@ -888,12 +888,18 @@ class CardSynthesizer:
         if "error" in data:
             return None
 
-        q = data.get("query") or query or ""
-        total_count = data.get("totalCount", 0)
+        data_root = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+        if isinstance(data_root, dict) and "items" in data_root and isinstance(data_root["items"], list) and data_root["items"]:
+            first_item = data_root["items"][0]
+            if isinstance(first_item, dict) and any(k in first_item for k in ["notices", "schedules", "directory", "departmentNotices"]):
+                data_root = first_item
+
+        q = data_root.get("query") or data_root.get("q") or query or ""
+        total_count = data_root.get("totalCount", 0)
         items: List[ListItem] = []
 
         # 1. Directory (교직원 / 학과 연락처)
-        dir_sec = data.get("directory")
+        dir_sec = data_root.get("directory")
         if isinstance(dir_sec, dict) and dir_sec.get("items"):
             for d in dir_sec["items"][:2]:
                 name = d.get("name") or "교직원/학과"
@@ -910,7 +916,7 @@ class CardSynthesizer:
                 )
 
         # 2. Notices (학교 공지사항)
-        notices_sec = data.get("notices")
+        notices_sec = data_root.get("notices")
         if isinstance(notices_sec, dict) and notices_sec.get("items"):
             for n in notices_sec["items"][:2]:
                 title = n.get("title") or "공지사항"
@@ -929,7 +935,7 @@ class CardSynthesizer:
                 )
 
         # 3. Department Notices (학과 공지)
-        dept_sec = data.get("departmentNotices")
+        dept_sec = data_root.get("departmentNotices")
         if isinstance(dept_sec, dict) and dept_sec.get("items"):
             for dn in dept_sec["items"][:2]:
                 title = dn.get("title") or "학과공지"
@@ -946,7 +952,7 @@ class CardSynthesizer:
                 )
 
         # 4. Schedules (학사일정)
-        sched_sec = data.get("schedules")
+        sched_sec = data_root.get("schedules")
         if isinstance(sched_sec, dict) and sched_sec.get("items"):
             for s in sched_sec["items"][:2]:
                 content = s.get("content") or "학사일정"
@@ -963,7 +969,7 @@ class CardSynthesizer:
                 )
 
         # 5. Courses (개설 강의)
-        course_sec = data.get("courses")
+        course_sec = data_root.get("courses")
         if isinstance(course_sec, dict) and course_sec.get("items"):
             for c in course_sec["items"][:2]:
                 c_name = c.get("courseName") or "강의"
@@ -980,7 +986,7 @@ class CardSynthesizer:
                 )
 
         # 6. Clubs (동아리)
-        club_sec = data.get("clubs")
+        club_sec = data_root.get("clubs")
         if isinstance(club_sec, dict) and club_sec.get("items"):
             for cl in club_sec["items"][:2]:
                 name = cl.get("name") or "동아리"
@@ -995,7 +1001,7 @@ class CardSynthesizer:
                 )
 
         # 7. Posts (커뮤니티)
-        post_sec = data.get("posts")
+        post_sec = data_root.get("posts")
         if isinstance(post_sec, dict) and post_sec.get("items"):
             for p in post_sec["items"][:2]:
                 title = p.get("title") or "게시글"
