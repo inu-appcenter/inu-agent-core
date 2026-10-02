@@ -116,6 +116,16 @@ class AgentOrchestrator:
         raw_token = client_ctx.get("auth") or client_ctx.get("authorization", "")
         clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
 
+        portal_meta = client_ctx.get("portal") if isinstance(client_ctx.get("portal"), dict) else {}
+        logger.info(
+            f"[AGENT_START] client={request.client} query='{request.message[:60]}' "
+            f"auth={bool(clean_token)} portal_linked={portal_meta.get('linked')} "
+            f"context_keys={list(client_ctx.keys())}"
+        )
+        logger.info(
+            f"[TOOL_RETRIEVAL] candidates={[f'{t.name}({t.category})' for t in candidate_tools]}"
+        )
+
         exec_context = {
             "auth": clean_token,
             "authorization": f"Bearer {clean_token}" if clean_token else "",
@@ -204,6 +214,11 @@ class AgentOrchestrator:
             thought = response.get("thought") or ""
             content = response.get("content") or ""
             tool_calls = response.get("tool_calls") or []
+
+            logger.info(
+                f"[REACT_HOP_{hop + 1}] thought='{thought[:80]}...' "
+                f"tool_calls={[tc.get('function', {}).get('name') for tc in tool_calls]}"
+            )
 
             # If thought was not streamed token-by-token, yield it now
             if thought and not streamed_any_thought:
@@ -437,6 +452,14 @@ class AgentOrchestrator:
 
         synthesis_messages.append({"role": "user", "content": request.message})
 
+        logger.info(
+            f"[GROUNDING_STATUS] query='{request.message[:40]}' "
+            f"executed_tools={list(executed_tool_names)} "
+            f"categories={list(executed_categories)} "
+            f"has_grounding={bool(tool_summary_text.strip())} "
+            f"summary_len={len(tool_summary_text)}"
+        )
+
         try:
             logger.info(
                 f"Starting synthesis stream for '{request.message[:30]}...' (Categories: {executed_categories})"
@@ -445,9 +468,38 @@ class AgentOrchestrator:
             async for token in llm_client.stream_chat(messages=synthesis_messages):
                 yield AgentStreamEvent(event_type="TOKEN", content=token)
 
+            # Debug metadata event for troubleshooting and diagnostic trace
+            if client_ctx.get("debug") or client_ctx.get("show_debug"):
+                from app.orchestrator.prompts import get_current_semester
+                yield AgentStreamEvent(
+                    event_type="DEBUG",
+                    debug={
+                        "query": request.message,
+                        "client": request.client,
+                        "semester": get_current_semester(datetime.now()),
+                        "candidate_tools": [t.name for t in candidate_tools],
+                        "executed_tools": list(executed_tool_names),
+                        "executed_categories": list(executed_categories),
+                        "dispatched_actions": list(emitted_actions),
+                        "emitted_cards": list(emitted_cards),
+                        "grounding_data_length": len(tool_summary_text),
+                        "has_grounded_data": bool(tool_summary_text.strip()),
+                    }
+                )
+
+            # Optional inline debug footer in response text if requested
+            if client_ctx.get("show_debug_footer"):
+                debug_footer = (
+                    f"\n\n---\n`[DEBUG TRACE]`\n"
+                    f"- **도구 후보군**: {', '.join(t.name for t in candidate_tools)}\n"
+                    f"- **실행된 도구**: {', '.join(executed_tool_names) or '없음'}\n"
+                    f"- **조회 데이터 수신**: {'성공 (데이터 있음)' if tool_summary_text.strip() else '없음 (0건 또는 미조회)'}\n"
+                )
+                yield AgentStreamEvent(event_type="TOKEN", content=debug_footer)
+
             yield AgentStreamEvent(event_type="DONE")
         except Exception as e:
-            logger.error(f"Error in orchestrator stream: {e}", exc_info=True)
+            logger.error(f"[AGENT_ERROR] Error in orchestrator stream: {e}", exc_info=True)
             yield AgentStreamEvent(event_type="ERROR", error=str(e))
 
     async def _execute_tool(
@@ -469,6 +521,8 @@ class AgentOrchestrator:
         summary_out = ""
         ac_data_out = {}
         rag_data_out = None
+
+        logger.info(f"[TOOL_EXEC_START] tool={tool.name} category={tool.category} args={tool_args}")
 
         # Case A: Client Action (LMS, Portal ERP)
         if tool.category in ["LMS", "PORTAL"]:
@@ -562,6 +616,10 @@ class AgentOrchestrator:
                     try:
                         action_instruction = await tool.execute({}, exec_context)
                         if hasattr(action_instruction, "action_id"):
+                            logger.info(
+                                f"[ACTION_DISPATCHED] action_id={action_instruction.action_id} domain={action_instruction.auth_domain} "
+                                f"target={action_instruction.request.url if action_instruction.request else 'none'}"
+                            )
                             yield (AgentStreamEvent(event_type="ACTION_REQUIRED", action=action_instruction), "", None, None)
                             emitted_actions.add(tool.category)
                             has_dispatched_action = True
