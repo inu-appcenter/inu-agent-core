@@ -945,10 +945,19 @@ class AgentOrchestrator:
                         tool_data = res
                         caf_name = final_args.get("cafeteria", "학생식당")
                         raw_menus = []
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
                         if isinstance(res, list):
                             raw_menus = res
                         elif isinstance(res, dict):
-                            raw_menus = res.get("data") or res.get("items") or res.get("menus") or res.get("cafeterias") or []
+                            raw_menus = (
+                                res.get("rawData")
+                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
+                                or res.get("data")
+                                or res.get("items")
+                                or res.get("menus")
+                                or res.get("cafeterias")
+                                or []
+                            )
                             if isinstance(raw_menus, dict):
                                 raw_menus = [raw_menus]
 
@@ -971,18 +980,37 @@ class AgentOrchestrator:
                         elif isinstance(raw_menus, list):
                             for m in raw_menus:
                                 if isinstance(m, dict):
-                                    corner = m.get("name") or m.get("cornerName") or m.get("corner") or "코너"
-                                    menu_str = m.get("menu") or m.get("menuName") or ""
-                                    meal_label = m.get("mealLabel") or m.get("mealType") or ""
-                                    if menu_str and menu_str != "-":
-                                        has_valid_menu = True
-                                        prefix = f"[{meal_label}] " if meal_label else ""
-                                        lines.append(f"- {prefix}{corner}: {menu_str}")
+                                    if "breakfast" in m or "lunch" in m or "dinner" in m:
+                                        b = m.get("breakfast")
+                                        l = m.get("lunch")
+                                        d = m.get("dinner")
+                                        for meal_label, meal_val in [("조식(아침)", b), ("중식(점심)", l), ("석식(저녁)", d)]:
+                                            clean_val = str(meal_val).strip() if meal_val else ""
+                                            if clean_val and clean_val not in ["-", "운영없음", "식단 없음"]:
+                                                has_valid_menu = True
+                                                lines.append(f"### [{meal_label}]\n{clean_val}\n")
+                                            elif clean_val:
+                                                lines.append(f"- {meal_label}: {clean_val}")
+                                    else:
+                                        corner = m.get("name") or m.get("cornerName") or m.get("corner") or "코너"
+                                        menu_str = m.get("menu") or m.get("menuName") or ""
+                                        meal_label = m.get("mealLabel") or m.get("mealType") or ""
+                                        if menu_str and menu_str != "-":
+                                            has_valid_menu = True
+                                            prefix = f"[{meal_label}] " if meal_label else ""
+                                            lines.append(f"- {prefix}{corner}: {menu_str}")
+
+                        if not has_valid_menu and mcp_summary:
+                            has_valid_menu = True
+                            lines.append(f"\n{mcp_summary}")
 
                         if has_valid_menu:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
                             lines.append("\n⚠️ 핵심 지침: 반드시 위 실제 조회된 메뉴 목록에 근거하여 안내하세요. 위 목록에 없는 가상의 메뉴를 절대로 추가하거나 지어내지 마세요.")
                             summary_out = "\n".join(lines) + "\n"
                         else:
+                            status_state = "empty"
                             status_title = f"{tool_display_name} 결과 없음"
                             summary_out = (
                                 f"\n[CAFETERIA {caf_name} 식단 메뉴 조회 결과]:\n"
@@ -1031,9 +1059,19 @@ class AgentOrchestrator:
                         if isinstance(res, list):
                             classes = res
                         elif isinstance(res, dict):
-                            classes = res.get("items") or res.get("todayClasses") or res.get("courses") or []
+                            classes = (
+                                res.get("rawData")
+                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
+                                or res.get("items")
+                                or res.get("todayClasses")
+                                or res.get("courses")
+                                or []
+                            )
+                        if isinstance(classes, dict):
+                            classes = [classes]
 
                         if not classes:
+                            status_state = "empty"
                             status_title = f"{tool_display_name} 결과 없음"
                             summary_out = (
                                 "\n[INTIP 인팁 시간표 조회 결과]:\n"
@@ -1042,6 +1080,8 @@ class AgentOrchestrator:
                                 "⚠️ 중요: 이 기능은 인팁(INTIP) 앱 자체의 시간표 기능이므로, 포털/LMS 계정 연동을 절대 요구하지 마세요.\n"
                             )
                         else:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
                             summary_out = (
                                 f"\n[INTIP 인팁 오늘의 수업 시간표]:\n"
                                 f"{json.dumps(classes, ensure_ascii=False)[:1000]}\n"
@@ -1066,63 +1106,102 @@ class AgentOrchestrator:
                         if isinstance(res, list):
                             raw_list = res
                         elif isinstance(res, dict):
-                            raw_list = res.get("contents") or res.get("items") or (res.get("data", {}).get("contents") if isinstance(res.get("data"), dict) else []) or []
+                            raw_list = (
+                                res.get("rawData")
+                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
+                                or res.get("contents")
+                                or res.get("items")
+                                or (res.get("data", {}).get("contents") if isinstance(res.get("data"), dict) else [])
+                                or (res.get("data") if isinstance(res.get("data"), list) else [])
+                                or []
+                            )
+                        if isinstance(raw_list, dict):
+                            raw_list = [raw_list]
 
-                        if "college" in tool.name.lower() or "office" in tool.name.lower():
-                            contacts = raw_list
-                            lines = [f"\n[교내 학과/단과대 사무실(과사) 연락처 조회 결과 (검색어: '{q_param}')]:"]
-                            if contacts:
-                                for c in contacts[:5]:
-                                    if isinstance(c, dict):
-                                        dept = c.get("departmentName") or c.get("deptName") or ""
-                                        colg = c.get("collegeName") or ""
-                                        phone = c.get("officePhoneNumber") or c.get("phoneNumber") or ""
-                                        loc = c.get("officeLocation") or c.get("location") or ""
-                                        dept_label = f"{dept} ({colg})" if colg else dept
-                                        lines.append(f"- {dept_label} 학과 사무실: 📞 {phone}" + (f" (위치: {loc})" if loc else ""))
-                            else:
-                                status_title = f"{tool_display_name} 결과 없음"
-                                lines.append(f"- '{q_param}' 관련 학과 사무실 연락처가 조회되지 않았습니다.")
-                            lines.append("💡 지침: 위 학과 사무실 번호는 학과 사무실(과사) 번호이며 교수님 개인 연구실 번호가 아닙니다. 학과 사무실 번호임을 명확히 구분하여 안내하세요.")
-                            summary_out = "\n".join(lines) + "\n"
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                        is_empty = False
+                        if not raw_list and not mcp_summary:
+                            is_empty = True
+                        elif mcp_summary and ("찾지 못했습니다" in mcp_summary or "없습니다" in mcp_summary) and not raw_list:
+                            is_empty = True
+
+                        if is_empty:
+                            status_state = "empty"
+                            status_title = f"{q_param} 연락처 결과 없음" if q_param else f"{tool_display_name} 결과 없음"
+                            summary_out = (
+                                f"\n[교내 부서/학과/교수 연락처 검색 결과 (검색어: '{q_param}')]:\n"
+                                f"- 검색어 '{q_param}' 관련 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다.\n"
+                                f"⚠️ 핵심 응답 지침: 교내 전화번호부 검색 결과 '{q_param}' 관련 연락처가 등록되어 있지 않습니다. "
+                                f"절대로 '조회 중입니다', '잠시만 기다려 주세요', '조회를 진행하겠습니다'라는 미완료/진행형 표현을 사용하지 마세요! "
+                                f"조회가 이미 완료되었으며 교내 DB에 미등록된 상태임을 사실대로 안내하고, 소속 단과대/학과 사무실(과사)로 직접 문의하도록 안내하여 답변을 완결하세요.\n"
+                            )
                         else:
-                            entries = raw_list
-                            lines = [f"\n[교내 교수/교직원/부서 연락처 검색 결과 (검색어: '{q_param}')]:"]
-                            if entries:
-                                status_title = f"{q_param} 교수님 연락처 확인 완료" if q_param and not q_param.endswith("과") else f"{tool_display_name} 확인 완료"
-                                for e in entries[:5]:
-                                    if isinstance(e, dict):
-                                        name = e.get("name") or ""
-                                        pos = e.get("position") or ""
-                                        affil = e.get("detailAffiliation") or e.get("affiliation") or ""
-                                        phone = e.get("phoneNumber") or ""
-                                        email = e.get("email") or ""
-                                        lines.append(f"- {name} ({pos}, {affil}): 📞 {phone}" + (f", ✉️ {email}" if email else ""))
+                            status_state = "completed"
+                            status_title = f"{q_param} 연락처 확인 완료" if q_param else f"{tool_display_name} 확인 완료"
+                            if mcp_summary and "찾지 못했습니다" not in mcp_summary:
+                                summary_out = (
+                                    f"\n[교내 부서/학과/교수 연락처 검색 결과 (검색어: '{q_param}')]:\n"
+                                    f"{mcp_summary}\n"
+                                    f"💡 지침: 위 조회된 실제 연락처(전화번호, 이메일, 연구실/사무실 위치 등)를 학생에게 사실대로 정확히 안내하세요. 가상의 정보를 임의로 추가하거나 지어내지 마세요.\n"
+                                )
                             else:
-                                status_title = f"{q_param} 교수님 연락처 결과 없음" if q_param and not q_param.endswith("과") else f"{tool_display_name} 결과 없음"
-                                lines.append(f"- 검색어 '{q_param}' 관련 교수/교직원 개인 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다.")
-                                lines.append(f"⚠️ 핵심 응답 지침: 교내 전화번호부 검색 결과 '{q_param}' 교수님의 개인 연락처가 등록되어 있지 않습니다. 절대로 '조회 중입니다', '잠시만 기다려 주세요', '조회를 진행하겠습니다'라는 미완료/진행형 표현을 사용하지 마세요! 조회가 이미 완료되었으며 개인 연구실 번호가 미등록된 상태임을 사실대로 안내하고, 소속 학과 사무실(과사)로 문의하여 안내받도록 답변을 완결하세요.")
-                            summary_out = "\n".join(lines) + "\n"
+                                lines = [f"\n[교내 부서/학과/교수 연락처 검색 결과 (검색어: '{q_param}')]:"]
+                                for e in raw_list[:6]:
+                                    if isinstance(e, dict):
+                                        dept_name = e.get("departmentName") or e.get("deptName") or ""
+                                        name = e.get("name") or ""
+                                        if dept_name and not name:
+                                            colg = e.get("collegeName") or ""
+                                            phone = e.get("officePhoneNumber") or e.get("phoneNumber") or ""
+                                            loc = e.get("officeLocation") or e.get("location") or ""
+                                            hp = e.get("homepageUrl") or ""
+                                            label = f"{dept_name} ({colg})" if colg else dept_name
+                                            lines.append(f"- [학과 사무실] {label}: 📞 {phone}" + (f" (위치: {loc})" if loc else "") + (f", 홈페이지: {hp}" if hp else ""))
+                                        else:
+                                            pos = e.get("position") or ""
+                                            affil = e.get("detailAffiliation") or e.get("affiliation") or ""
+                                            phone = e.get("phoneNumber") or ""
+                                            email = e.get("email") or ""
+                                            lines.append(f"- [교수/교직원] {name} ({pos}, {affil}): 📞 {phone}" + (f", ✉️ {email}" if email else ""))
+                                lines.append("💡 지침: 위 조회된 실제 연락처(전화번호, 이메일, 연구실/사무실 위치 등)를 학생에게 사실대로 정확히 안내하세요.")
+                                summary_out = "\n".join(lines) + "\n"
                     elif tool.category == "SCHEDULE":
                         tool_data = res
                         sched_list = []
                         if isinstance(res, list):
                             sched_list = res
                         elif isinstance(res, dict):
-                            sched_list = res.get("items") or res.get("contents") or res.get("schedules") or (res.get("data") if isinstance(res.get("data"), list) else [])
+                            sched_list = (
+                                res.get("rawData")
+                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
+                                or res.get("items")
+                                or res.get("contents")
+                                or res.get("schedules")
+                                or (res.get("data") if isinstance(res.get("data"), list) else [])
+                                or []
+                            )
+                        if isinstance(sched_list, dict):
+                            sched_list = [sched_list]
 
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
                         lines = [f"\n[인천대학교 학사일정 조회 결과 ({tool_display_name})]:"]
-                        if sched_list:
-                            for s in sched_list[:8]:
-                                if isinstance(s, dict):
-                                    title = s.get("title") or s.get("content") or "학사일정"
-                                    start = s.get("start") or s.get("startDate") or ""
-                                    end = s.get("end") or s.get("endDate") or ""
-                                    date_str = f"{start} ~ {end}" if start and end and start != end else (start or end or "일정 미정")
-                                    cal_link = f"/home/calendar?date={start}" if start else "/home/calendar"
-                                    lines.append(f"- [{title}]({cal_link}) (기간: {date_str})")
+                        if sched_list or mcp_summary:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
+                            if sched_list:
+                                for s in sched_list[:8]:
+                                    if isinstance(s, dict):
+                                        title = s.get("title") or s.get("content") or "학사일정"
+                                        start = s.get("start") or s.get("startDate") or ""
+                                        end = s.get("end") or s.get("endDate") or ""
+                                        date_str = f"{start} ~ {end}" if start and end and start != end else (start or end or "일정 미정")
+                                        cal_link = f"/home/calendar?date={start}" if start else "/home/calendar"
+                                        lines.append(f"- [{title}]({cal_link}) (기간: {date_str})")
+                            elif mcp_summary:
+                                lines.append(mcp_summary)
                             lines.append("\n💡 [학사일정 링크 작성 지침]: 학사일정에는 절대 공지사항 링크(/home/notice/{id})를 붙이지 마세요! 위 제공된 인팁 앱 캘린더 상대 경로인 `[일정명](/home/calendar?date=YYYY-MM-DD)`(시작일 기준) 또는 `[학사일정 전체보기](/home/calendar)`로만 마크다운 링크를 표(|---|---|)나 목록에 그대로 작성하세요.")
                         else:
+                            status_state = "empty"
                             status_title = f"{tool_display_name} 결과 없음"
                             lines.append("- 조회된 학사일정이 없습니다.")
                             lines.append("💡 [학사일정 링크 작성 지침]: 학생에게 등록된 일정이 없음을 안내하고, 전체 학사일정을 확인할 수 있도록 `[학사일정 전체보기](/home/calendar)` 링크를 제공하세요.")
@@ -1133,34 +1212,51 @@ class AgentOrchestrator:
                         if isinstance(res, list):
                             notices_list = res
                         elif isinstance(res, dict):
-                            notices_list = res.get("contents") or res.get("items") or res.get("notices") or []
+                            notices_list = (
+                                res.get("rawData")
+                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
+                                or res.get("contents")
+                                or res.get("items")
+                                or res.get("notices")
+                                or []
+                            )
+                        if isinstance(notices_list, dict):
+                            notices_list = [notices_list]
 
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
                         lines = [f"\n[인천대학교 공지사항 조회 결과 ({tool_display_name})]:"]
-                        if notices_list:
-                            for n in notices_list[:5]:
-                                if isinstance(n, dict):
-                                    t = n.get("title") or "공지사항"
-                                    n_id = n.get("id")
-                                    # INTIP 내부 상세 페이지 경로 (/home/notice/{id}) 연결로 외부 브라우저 이탈 방지
-                                    u = f"/home/notice/{n_id}" if n_id else (n.get("url") or "")
-                                    d = n.get("createDate") or n.get("date") or ""
-                                    w = n.get("writer") or n.get("category") or ""
-                                    link_str = f"[{t}]({u})" if u else t
-                                    sub_str = f" (게시일: {d}, 작성: {w})" if d or w else ""
-                                    lines.append(f"- {link_str}{sub_str}")
+                        if notices_list or mcp_summary:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
+                            if notices_list:
+                                for n in notices_list[:5]:
+                                    if isinstance(n, dict):
+                                        t = n.get("title") or "공지사항"
+                                        n_id = n.get("id")
+                                        # INTIP 내부 상세 페이지 경로 (/home/notice/{id}) 연결로 외부 브라우저 이탈 방지
+                                        u = f"/home/notice/{n_id}" if n_id else (n.get("url") or "")
+                                        d = n.get("createDate") or n.get("date") or ""
+                                        w = n.get("writer") or n.get("category") or ""
+                                        link_str = f"[{t}]({u})" if u else t
+                                        sub_str = f" (게시일: {d}, 작성: {w})" if d or w else ""
+                                        lines.append(f"- {link_str}{sub_str}")
+                            elif mcp_summary:
+                                lines.append(mcp_summary)
                             lines.append("💡 [중요 지침]: 위 공지 제목과 내부 상세 링크(/home/notice/{공지ID})를 마크다운 링크 형식([공지제목](/home/notice/{id}))으로 답변에 그대로 포함하여 안내하세요. 외부 브라우저로 나가지 않고 INTIP 앱 내부 상세 페이지로 열립니다.")
                         else:
+                            status_state = "empty"
                             status_title = f"{tool_display_name} 결과 없음"
                             lines.append("- 조회된 공지사항이 없습니다.")
                         summary_out = "\n".join(lines) + "\n"
                     elif tool.category == "SEARCH" or "unifiedsearch" in tool.name.lower():
                         tool_data = res
                         if isinstance(res, dict):
-                            total_cnt = res.get("totalCount", 0)
-                            q_val = res.get("query", "")
+                            s_data = res.get("rawData") if isinstance(res.get("rawData"), dict) else res
+                            total_cnt = s_data.get("totalCount", 0)
+                            q_val = s_data.get("query", final_args.get("query", ""))
                             lines = [f"\n[인천대학교 통합 검색 결과 (검색어: '{q_val}', 총 {total_cnt}건)]:"]
 
-                            notices = res.get("notices", {}).get("items", []) if isinstance(res.get("notices"), dict) else []
+                            notices = s_data.get("notices", {}).get("items", []) if isinstance(s_data.get("notices"), dict) else []
                             if notices:
                                 lines.append("- 📢 학교 공지사항:")
                                 for n in notices[:5]:
@@ -1174,7 +1270,7 @@ class AgentOrchestrator:
                                     sub_str = f" (게시일: {d}, 작성: {w})" if d or w else ""
                                     lines.append(f"  • {link_str}{sub_str}")
 
-                            dept_notices = res.get("departmentNotices", {}).get("items", []) if isinstance(res.get("departmentNotices"), dict) else []
+                            dept_notices = s_data.get("departmentNotices", {}).get("items", []) if isinstance(s_data.get("departmentNotices"), dict) else []
                             if dept_notices:
                                 lines.append("- 📢 학과 공지사항:")
                                 for dn in dept_notices[:5]:
@@ -1186,7 +1282,7 @@ class AgentOrchestrator:
                                     sub_str = f" (학과: {dept}, 게시일: {d})" if dept or d else ""
                                     lines.append(f"  • {link_str}{sub_str}")
 
-                            dirs = res.get("directory", {}).get("items", []) if isinstance(res.get("directory"), dict) else []
+                            dirs = s_data.get("directory", {}).get("items", []) if isinstance(s_data.get("directory"), dict) else []
                             if dirs:
                                 lines.append("- 📞 교직원 및 학과 연락처:")
                                 for di in dirs[:3]:
@@ -1196,7 +1292,7 @@ class AgentOrchestrator:
                                     pos = di.get("position") or di.get("duties") or ""
                                     lines.append(f"  • {name} ({aff}): 📞 {phone} {pos}".strip())
 
-                            scheds = res.get("schedules", {}).get("items", []) if isinstance(res.get("schedules"), dict) else []
+                            scheds = s_data.get("schedules", {}).get("items", []) if isinstance(s_data.get("schedules"), dict) else []
                             if scheds:
                                 lines.append("- 📅 학사일정:")
                                 for s in scheds[:5]:
@@ -1207,7 +1303,7 @@ class AgentOrchestrator:
                                     cal_link = f"/home/calendar?date={start}" if start else "/home/calendar"
                                     lines.append(f"  • [{content}]({cal_link}){date_str}")
 
-                            courses = res.get("courses", {}).get("items", []) if isinstance(res.get("courses"), dict) else []
+                            courses = s_data.get("courses", {}).get("items", []) if isinstance(s_data.get("courses"), dict) else []
                             if courses:
                                 lines.append("- 📚 개설강의:")
                                 for c in courses[:3]:
@@ -1217,23 +1313,26 @@ class AgentOrchestrator:
                                     credit = c.get("credit") or ""
                                     lines.append(f"  • {c_name} ({prof} 교수, {time_room}, {credit}학점)".strip())
 
-                            clubs = res.get("clubs", {}).get("items", []) if isinstance(res.get("clubs"), dict) else []
+                            clubs = s_data.get("clubs", {}).get("items", []) if isinstance(s_data.get("clubs"), dict) else []
                             if clubs:
                                 lines.append("- 🎯 동아리:")
                                 for cl in clubs[:3]:
                                     lines.append(f"  • {cl.get('name')} ({cl.get('category')}, {cl.get('room')})")
 
-                            posts = res.get("posts", {}).get("items", []) if isinstance(res.get("posts"), dict) else []
+                            posts = s_data.get("posts", {}).get("items", []) if isinstance(s_data.get("posts"), dict) else []
                             if posts:
                                 lines.append("- 💬 커뮤니티:")
                                 for p in posts[:3]:
                                     lines.append(f"  • {p.get('title')} ({p.get('board')}, 추천: {p.get('likeCount')})")
 
                             if total_cnt == 0:
+                                status_state = "empty"
                                 status_title = f"{tool_display_name} 결과 없음"
                                 lines.append("- 검색 결과가 0건입니다.")
                                 lines.append("💡 [자율 재검색 지침]: 결과가 0건이므로, 질문에서 불필요한 수식어를 덜어내거나 상위어/동의어로 검색어를 완화하여 1회 재검색(Query Expansion)할 수 있습니다. 이미 재검색했거나 마땅한 키워드가 없으면 검색 결과가 없음을 친절히 안내하세요.")
                             else:
+                                status_state = "completed"
+                                status_title = f"{tool_display_name} 확인 완료"
                                 lines.append("💡 [중요 지침]: 검색 결과가 충분히 확보되었습니다. 추가 도구 호출을 즉시 중단하고, 위 공지 제목과 제공된 링크(학교공지는 INTIP 내부 상세 경로인 /home/notice/{공지ID})를 표나 목록에 마크다운 링크([공지제목](링크)) 형태로 그대로 포함하여 최종 답변을 작성하세요. 단순 텍스트로만 제목을 적지 마십시오.")
 
                             summary_out = "\n".join(lines) + "\n"

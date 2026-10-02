@@ -187,7 +187,7 @@ class CardSynthesizer:
         if isinstance(data, list):
             raw_list = data
         elif isinstance(data, dict):
-            raw_list = data.get("data") or data.get("cafeterias") or data.get("menus") or data.get("items") or []
+            raw_list = data.get("rawData") or data.get("data") or data.get("cafeterias") or data.get("menus") or data.get("items") or (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else []) or []
             if isinstance(raw_list, dict):
                 raw_list = [raw_list]
 
@@ -212,17 +212,31 @@ class CardSynthesizer:
         elif isinstance(raw_list, list):
             for m in raw_list[:5]:
                 if isinstance(m, dict):
-                    corner = m.get("name") or m.get("cornerName") or m.get("restaurant") or "식당"
-                    menu_text = m.get("menu") or m.get("menuName") or ""
-                    if menu_text and menu_text != "-":
-                        items.append(
-                            ListItem(
-                                title=str(corner),
-                                subtitle=str(menu_text).replace("\n", " | "),
-                                tag=m.get("mealLabel", "식단"),
-                                link="/home/menu",
+                    if "breakfast" in m or "lunch" in m or "dinner" in m:
+                        caf = m.get("cafeteria", "식당")
+                        for m_lbl, m_field in [("조식", "breakfast"), ("중식", "lunch"), ("석식", "dinner")]:
+                            m_val = str(m.get(m_field) or "").strip()
+                            if m_val and m_val != "-":
+                                items.append(
+                                    ListItem(
+                                        title=f"{caf} {m_lbl}",
+                                        subtitle=m_val.replace("\n", " | "),
+                                        tag=m_lbl,
+                                        link="/home/menu",
+                                    )
+                                )
+                    else:
+                        corner = m.get("name") or m.get("cornerName") or m.get("restaurant") or "식당"
+                        menu_text = m.get("menu") or m.get("menuName") or ""
+                        if menu_text and menu_text != "-":
+                            items.append(
+                                ListItem(
+                                    title=str(corner),
+                                    subtitle=str(menu_text).replace("\n", " | "),
+                                    tag=m.get("mealLabel", "식단"),
+                                    link="/home/menu",
+                                )
                             )
-                        )
 
         if not items:
             return None
@@ -340,7 +354,14 @@ class CardSynthesizer:
                     return None
 
         items: List[ListItem] = []
-        notices = data if isinstance(data, list) else data.get("contents", data.get("notices", []))
+        notices = data if isinstance(data, list) else (
+            data.get("rawData")
+            or (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else [])
+            or data.get("contents")
+            or data.get("notices")
+            or data.get("items")
+            or []
+        )
 
         for n in notices[:4]:
             if isinstance(n, dict):
@@ -374,7 +395,14 @@ class CardSynthesizer:
         if not data:
             return None
         items: List[ListItem] = []
-        schedules = data if isinstance(data, list) else data.get("schedules", [])
+        schedules = data if isinstance(data, list) else (
+            data.get("rawData")
+            or (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else [])
+            or data.get("schedules")
+            or data.get("items")
+            or data.get("contents")
+            or []
+        )
 
         for s in schedules[:4]:
             if isinstance(s, dict):
@@ -484,15 +512,24 @@ class CardSynthesizer:
             return None
         items: List[ListItem] = []
         contacts = data if isinstance(data, list) else (
-            data.get("contents") or data.get("items") or data.get("contacts") or []
+            data.get("rawData")
+            or (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else [])
+            or data.get("contents")
+            or data.get("items")
+            or data.get("contacts")
+            or (data.get("data") if isinstance(data.get("data"), list) else [])
+            or []
         )
+        if isinstance(contacts, dict):
+            contacts = [contacts]
 
         for c in contacts[:4]:
             if isinstance(c, dict):
                 # College office contact vs individual directory entry
                 dept_name = c.get("departmentName") or c.get("deptName")
                 indiv_name = c.get("name")
-                name = dept_name or indiv_name or "연락처"
+                is_office = bool(dept_name and not indiv_name)
+                name = dept_name if is_office else (indiv_name or dept_name or "연락처")
 
                 phone = c.get("officePhoneNumber") or c.get("phoneNumber") or c.get("phone") or c.get("tel") or ""
                 location = c.get("officeLocation") or c.get("office") or c.get("location") or ""
@@ -500,7 +537,7 @@ class CardSynthesizer:
                 position = c.get("position")
                 detail_aff = c.get("detailAffiliation") or c.get("affiliation")
 
-                tag = (college or position or detail_aff or "연락처")[:8]
+                tag = "학과사무실" if is_office else ((position or college or detail_aff or "교내연락처")[:8])
                 sub_parts = []
                 if phone:
                     sub_parts.append(f"📞 {phone}")

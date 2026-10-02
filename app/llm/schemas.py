@@ -177,7 +177,7 @@ class AgentStreamEvent(BaseModel):
     status_id: Optional[str] = None
     status_title: Optional[str] = None
     status_category: Optional[str] = None
-    status_state: Optional[Literal["running", "completed", "failed"]] = None
+    status_state: Optional[Literal["running", "completed", "failed", "empty"]] = None
     thinking: Optional[str] = None
     # Developer diagnostic / debug trace
     debug: Optional[Dict[str, Any]] = None

@@ -80,12 +80,17 @@ class McpRemoteTool(BaseTool):
                     return {"error": err.get("message", "MCP Tool Error"), "code": err.get("code")}
 
                 result = data.get("result", {})
+                is_error = result.get("isError", False)
                 content_list = result.get("content", [])
                 text_content = ""
                 if isinstance(content_list, list):
                     for item in content_list:
                         if isinstance(item, dict) and item.get("type") == "text":
                             text_content += item.get("text", "")
+
+                if is_error:
+                    logger.warning(f"MCP remote tool [{self.name}] indicated isError=True: {text_content}")
+                    return {"error": text_content or "MCP execution failed", "summary": text_content}
 
                 return {
                     "summary": text_content,
