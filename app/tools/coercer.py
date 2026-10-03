@@ -50,6 +50,30 @@ CAMPUS_SYNONYMS: Dict[str, list[str]] = {
     "BIOENGINEERING": ["생명공학부", "생명공학과", "생공"],
 }
 
+# Korean Department canonical naming for course-offerings
+KOREAN_DEPARTMENTS: Dict[str, list[str]] = {
+    "컴퓨터공학부": ["컴공", "컴퓨터공학", "컴퓨터공학과", "컴퓨터", "computer_engineering"],
+    "데이터과학과": ["데이터사이언스", "데이터사이언스학과", "데사", "데이터과학", "data_science"],
+    "정보통신공학과": ["정보통신", "정보통신공학", "정통", "정통과"],
+    "임베디드시스템공학과": ["임베디드", "임베디드시스템", "임베", "임베디드시스템공학"],
+    "전기공학과": ["전기공학", "전기과", "전기"],
+    "전자공학과": ["전자공학", "전자과", "전자"],
+    "기계공학과": ["기계공학", "기계과", "기계"],
+    "화학공학과": ["화학공학", "화공과", "화공"],
+    "안전공학과": ["안전공학", "안전과", "안전"],
+    "생명공학부": ["생명공학", "생공", "바이오"],
+    "생명과학부": ["생명과학", "생과"],
+    "경영학부": ["경영학과", "경영학", "경영"],
+    "경제학과": ["경제학부", "경제학", "경제"],
+    "무역학부": ["무역학과", "무역학", "무역"],
+    "미디어커뮤니케이션학과": ["신문방송학과", "미디어커뮤니케이션", "미컴"],
+    "사회복지학과": ["사회복지", "사복"],
+    "패션산업학과": ["패션산업", "패디", "의류학과"],
+    "수학과": ["수학"],
+    "물리학과": ["물리"],
+    "화학과": ["화학"],
+}
+
 
 class SchemaCoercer:
     """
@@ -101,16 +125,17 @@ class SchemaCoercer:
             coerced["day"] = kst_now.weekday() + 1
 
         # Course offerings parameter resilience:
-        # If deptName is passed, always populate keyword as fallback to avoid 400 Bad Request
+        # Normalize deptName aliases (e.g. 컴공 -> 컴퓨터공학부, 데사 -> 데이터과학과)
         if "deptName" in properties and coerced.get("deptName"):
             raw_dept = str(coerced["deptName"]).strip()
-            if "keyword" in properties and not coerced.get("keyword"):
-                coerced["keyword"] = raw_dept
-            dept_prop = properties.get("deptName", {})
-            dept_enums = dept_prop.get("enum", [])
-            # If backend OpenAPI enum is mangled or doesn't match raw_dept, pop deptName so keyword handles search
-            if dept_enums and raw_dept not in dept_enums:
-                coerced.pop("deptName", None)
+            for canon_dept, aliases in KOREAN_DEPARTMENTS.items():
+                if raw_dept == canon_dept or raw_dept in aliases:
+                    coerced["deptName"] = canon_dept
+                    break
+            # Guard against keyword duplication: if keyword was erroneously set to deptName, remove keyword
+            # so the backend does not filter courseTitle by department name!
+            if coerced.get("keyword") and (coerced["keyword"] == coerced["deptName"] or coerced["keyword"] in KOREAN_DEPARTMENTS.get(coerced["deptName"], [])):
+                coerced.pop("keyword", None)
 
         for param, prop in properties.items():
             if param not in coerced:
@@ -144,8 +169,33 @@ class SchemaCoercer:
                     elif clean in ["false", "0", "no", "n", "f"]:
                         coerced[param] = False
 
-            # 3. Enum Coercion (Case-insensitivity & Semantic Synonyms)
+            # 3. Type Coercion: Array (e.g. hyNames, credits, isuNames)
+            elif p_type == "array" and val is not None:
+                if not isinstance(val, list):
+                    val_str = str(val).strip()
+                    digits = "".join(filter(str.isdigit, val_str))
+                    if digits and "hy" in param.lower():
+                        coerced[param] = [digits]
+                    elif "," in val_str:
+                        coerced[param] = [item.strip() for item in val_str.split(",") if item.strip()]
+                    else:
+                        coerced[param] = [val_str]
+                else:
+                    if "hy" in param.lower():
+                        cleaned_list = []
+                        for item in val:
+                            digits = "".join(filter(str.isdigit, str(item)))
+                            cleaned_list.append(digits if digits else str(item).strip())
+                        coerced[param] = cleaned_list
+                    else:
+                        coerced[param] = [str(x) for x in val]
+
+            # 4. Enum Coercion (Case-insensitivity & Semantic Synonyms)
             if p_enum and isinstance(val, str):
+                # If enum is corrupted with replacement characters from OpenAPI spec, skip enum rejection
+                if any("\ufffd" in str(e) for e in p_enum):
+                    continue
+
                 val_clean = val.strip()
 
                 # Exact match

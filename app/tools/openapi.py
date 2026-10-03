@@ -247,7 +247,7 @@ class OpenApiConnector:
                 else:
                     tool_name = self._sanitize_tool_name(op_id, path)
 
-                params_schema = self._build_params_schema(op.get("parameters", []))
+                params_schema = self._build_params_schema(op.get("parameters", []), path=path)
                 requires_auth = self._check_auth_required(op, root_security=root_security)
 
                 tool = OpenApiTool(
@@ -324,9 +324,11 @@ class OpenApiConnector:
             return len(root_security) > 0
         return False
 
-    def _build_params_schema(self, parameters: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _build_params_schema(self, parameters: List[Dict[str, Any]], path: str = "") -> Dict[str, Any]:
         properties = {}
         required = []
+
+        is_course_offerings = path == "/api/course-offerings"
 
         for p in parameters:
             p_name = p.get("name")
@@ -337,20 +339,58 @@ class OpenApiConnector:
             p_type = p_schema.get("type", "string")
             p_desc = p.get("description") or f"Parameter {p_name}"
 
+            # Canonical parameter schema overrides for course-offerings to eliminate OpenAPI encoding corruption
+            if is_course_offerings:
+                if p_name == "deptName":
+                    properties["deptName"] = {
+                        "type": "string",
+                        "description": "개설 학과명 (예: 컴퓨터공학부, 데이터과학과, 경영학부, 전자공학과 등). [주의] 학과별 개설강의 검색 시 필수 입력",
+                    }
+                    continue
+                elif p_name == "hyNames":
+                    properties["hyNames"] = {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "대상 학년 목록 (예: ['1'], ['2'], ['3'], ['4'])",
+                    }
+                    continue
+                elif p_name == "keyword":
+                    properties["keyword"] = {
+                        "type": "string",
+                        "description": "교과목명 또는 교수명 검색어 ([주의] 학과명은 keyword가 아닌 deptName에 넣어야 합니다)",
+                    }
+                    continue
+                elif p_name == "year":
+                    properties["year"] = {
+                        "type": "integer",
+                        "description": "개설 연도 (예: 2026)",
+                    }
+                    required.append("year")
+                    continue
+                elif p_name == "term":
+                    properties["term"] = {
+                        "type": "string",
+                        "enum": ["FIRST", "SECOND", "SUMMER", "WINTER"],
+                        "description": "개설 학기 (FIRST: 1학기, SECOND: 2학기, SUMMER: 여름계절학기, WINTER: 겨울계절학기)",
+                    }
+                    required.append("term")
+                    continue
+
             prop_def: Dict[str, Any] = {
                 "type": p_type,
-                "description": p_desc,
+                "description": p_desc.replace("\ufffd", "").strip(),
             }
             if "enum" in p_schema:
-                clean_enum = [e for e in p_schema["enum"] if not str(e).startswith("\ufffd")]
-                prop_def["enum"] = clean_enum if clean_enum else p_schema["enum"]
-                if clean_enum and not any(kw in p_desc for kw in ["허용 값", "Enum", "중 하나", "옵션"]):
-                    prop_def["description"] = f"{p_desc} (허용 값: {', '.join(map(str, clean_enum[:10]))})".strip()
+                clean_enum = [e for e in p_schema["enum"] if "\ufffd" not in str(e)]
+                if clean_enum:
+                    prop_def["enum"] = clean_enum
+                    if not any(kw in p_desc for kw in ["허용 값", "Enum", "중 하나", "옵션"]):
+                        prop_def["description"] = f"{prop_def['description']} (허용 값: {', '.join(map(str, clean_enum[:10]))})".strip()
             if "default" in p_schema:
                 prop_def["default"] = p_schema["default"]
 
             properties[p_name] = prop_def
-            if p.get("required"):
+            if p.get("required") and p_name not in required:
                 required.append(p_name)
 
         return {

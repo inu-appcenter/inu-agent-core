@@ -76,3 +76,36 @@ def test_schema_coercer_parameter_aliases():
     }
     assert SchemaCoercer.coerce(schema_query, {"q": "수강신청"}) == {"query": "수강신청"}
 
+
+def test_schema_coercer_course_offerings_dept_and_grade():
+    schema = {
+        "properties": {
+            "year": {"type": "integer"},
+            "term": {"type": "string"},
+            "deptName": {"type": "string"},
+            "hyNames": {"type": "array"},
+            "keyword": {"type": "string"},
+        }
+    }
+
+    # 1. Alias '컴공' -> '컴퓨터공학부', '2학년' -> ['2']
+    res1 = SchemaCoercer.coerce(schema, {"deptName": "컴공", "hyNames": "2학년"})
+    assert res1["deptName"] == "컴퓨터공학부"
+    assert res1["hyNames"] == ["2"]
+    assert "keyword" not in res1
+
+    # 2. Alias '데사' -> '데이터과학과'
+    res2 = SchemaCoercer.coerce(schema, {"deptName": "데사"})
+    assert res2["deptName"] == "데이터과학과"
+    assert "keyword" not in res2
+
+    # 3. If keyword accidentally equals deptName, keyword is popped
+    res3 = SchemaCoercer.coerce(schema, {"deptName": "컴퓨터공학부", "keyword": "컴퓨터공학부"})
+    assert res3["deptName"] == "컴퓨터공학부"
+    assert "keyword" not in res3
+
+    # 4. Valid course keyword is preserved
+    res4 = SchemaCoercer.coerce(schema, {"deptName": "컴퓨터공학부", "keyword": "자료구조"})
+    assert res4["deptName"] == "컴퓨터공학부"
+    assert res4["keyword"] == "자료구조"
+

@@ -129,7 +129,7 @@ def get_tool_orchestration_prompt(client: str) -> str:
    - 실패하거나 비어있는 도구는 그 사실을 명시하되, 사용자가 함께 질문한 나머지 영역에 대해서는 끝까지 도구를 호출하여 정상적으로 결과를 가져와 답변을 완성하십시오.
 
 8. **도메인별 최적 도구 직접 선택 가이드 (Direct Tool Selection Guide)**:
-   - **개설 강의 / 수강편람 / 강의 목록 조회**: 전용 개설 강의 조회 도구(`api_getCourseOfferings`)를 직접 호출하십시오. (파라미터: `year`=연도정수, `term`='FIRST'/'SECOND'/'SUMMER'/'WINTER', `deptName`=학과명, `keyword`=검색어. 통합검색보다 개설강의 전용 도구가 훨씬 정확합니다.)
+   - **개설 강의 / 수강편람 / 강의 목록 조회**: 전용 개설 강의 조회 도구(`api_getCourseOfferings`)를 직접 호출하십시오. (파라미터: `year`=연도정수, `term`='FIRST'/'SECOND'/'SUMMER'/'WINTER', `deptName`=학과명, `hyNames`=['1'/'2'/'3'/'4'], `keyword`=과목명/교수명. [중요]: 특정 학과의 개설 강의를 찾을 때는 반드시 `deptName`에 학과명(예: '컴퓨터공학부', '데이터과학과')을 전달하고, `keyword`에는 학과명을 중복 입력하지 마십시오.)
    - **교과목 강의계획서**: 먼저 `api_getCourseOfferings`(keyword=과목명)를 호출하여 `courseOfferingId`를 확보하거나, 또는 `api_getSyllabus`를 직접 호출하십시오.
    - **교내 전화번호부 / 교수·부서 연락처**: `api_searchDirectory` (교수명, 학과명, 부서명 검색). 검색 결과가 없거나 실패할 경우, 포기하지 말고 전 도메인 고도화 통합 검색 도구(`api_unifiedSearch`)를 연속으로 호출하십시오.
    - **학식 메뉴**: `api_getCafeteriaMenu` (식당명, 요일)
