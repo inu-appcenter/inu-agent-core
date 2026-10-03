@@ -221,32 +221,36 @@ class OpenApiConnector:
         p = path.lower()
         tag_str = " ".join(t.lower() for t in tags)
 
+        tags_lower = [t.lower() for t in tags]
         # Prioritize specific subdomains first (e.g. /api/directory/search is DIRECTORY, not general SEARCH)
-        if "/directory" in p or "contact" in p or "/department" in p or "directory" in tag_str:
+        if "/directory" in p or "contact" in p or "/department" in p or any("directory" in t for t in tags_lower):
             return "DIRECTORY"
-        if "/cafeteria" in p or "cafeteria" in tag_str:
+        if "/cafeteria" in p or any("cafeteria" in t for t in tags_lower):
             return "CAFETERIA"
-        if "/bus" in p or "buses" in p or "shuttle" in p or "bus" in tag_str:
+        if "/bus" in p or "buses" in p or "shuttle" in p or any(t in ["bus", "buses", "shuttle"] for t in tags_lower):
             return "BUS"
-        if "/timetable" in p or "syllabus" in p or "timetable" in tag_str:
+        if "/timetable" in p or any("timetable" in t for t in tags_lower):
             return "TIMETABLE"
-        if "/notice" in p or "councilnotice" in p or "notice" in tag_str:
-            return "NOTICE"
-        if "/schedule" in p or "/calendar" in p or "/semester" in p or "schedule" in tag_str:
-            return "SCHEDULE"
-        if "/reservation" in p or "reservation" in tag_str:
-            return "RESERVATION"
-        if "/weather" in p or "weather" in tag_str:
-            return "WEATHER"
-        if "/course" in p or "course" in tag_str:
+        if "/syllabus" in p or any("syllabus" in t for t in tags_lower):
             return "COURSE"
-        if "/club" in p or "club" in tag_str:
+        if "/notice" in p or "councilnotice" in p or any("notice" in t for t in tags_lower):
+            return "NOTICE"
+        if "/schedule" in p or "/calendar" in p or "/semester" in p or any("schedule" in t for t in tags_lower):
+            return "SCHEDULE"
+        if "/reservation" in p or any("reservation" in t for t in tags_lower):
+            return "RESERVATION"
+        if "/weather" in p or any("weather" in t for t in tags_lower):
+            return "WEATHER"
+        if "/course" in p or any("course" in t for t in tags_lower):
+            return "COURSE"
+        if "/club" in p or any("club" in t for t in tags_lower):
             return "CLUB"
-        if "/lost" in p or "lost" in tag_str:
+        if "/lost" in p or any("lost" in t for t in tags_lower):
             return "LOST_PROPERTY"
-        if "/search" in p or "search" in tag_str:
+        if "/search" in p or any("search" in t for t in tags_lower):
             return "SEARCH"
         return "INTIP"
+
 
     def _check_auth_required(self, op: Dict[str, Any]) -> bool:
         security = op.get("security", [])

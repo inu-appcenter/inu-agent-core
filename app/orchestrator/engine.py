@@ -340,8 +340,76 @@ class AgentOrchestrator:
                     else:
                         break
                 else:
-                    # No more tools needed, proceed to final response
-                    break
+                    # Deterministic Multi-Hop: Multi-Intent Intent Recovery
+                    # If the user asked a composite query with multiple distinct domains (e.g. Timetable + Bus, Cafeteria + Weather)
+                    # and one domain has not been executed yet, chain to it instead of prematurely quitting!
+                    is_bus_query = any(kw in request.message for kw in ["버스", "인천대입구", "정류장", "노선", "순환", "배차", "도착"])
+                    is_caf_query = any(kw in request.message for kw in ["학식", "식단", "메뉴", "밥", "점심", "저녁", "아침", "식당"])
+                    is_weather_query = any(kw in request.message for kw in ["날씨", "미세먼지", "기온", "온도", "비 와", "우산"])
+
+                    if is_bus_query and "BUS" not in executed_categories and not any("bus" in n.lower() for n in executed_tool_names):
+                        bus_tools = tool_registry.get_tools_by_category("BUS")
+                        bus_tool = next((t for t in bus_tools if "arrival" in t.name.lower()), bus_tools[0] if bus_tools else None)
+                        if not bus_tool:
+                            bus_tool = tool_registry.get_tool("api_getBusArrivals") or tool_registry.get_tool("getBusArrivals")
+                        if bus_tool:
+                            from app.orchestrator.router import DynamicBusMatcher
+                            bstop_id, stop_name, tab_name, valid_routes = await DynamicBusMatcher.resolve_stop_and_routes(request.message)
+                            resolved_stop = stop_name or "인천대입구역 방면"
+                            logger.info(f"Deterministic Multi-Hop: Chaining to {bus_tool.name} for unfulfilled bus intent (stop: {resolved_stop})")
+                            yield AgentStreamEvent(
+                                event_type="THINKING",
+                                thinking=f"사용자의 복합 질문에 포함된 {resolved_stop} 버스 실시간 도착 정보를 확인하기 위해 {bus_tool.name}을 호출합니다.",
+                            )
+                            from uuid import uuid4
+                            tool_calls = [{
+                                "id": f"call_auto_bus_{uuid4().hex[:6]}",
+                                "type": "function",
+                                "function": {
+                                    "name": bus_tool.name,
+                                    "arguments": {"bstopId": bstop_id or "164000395"},
+                                }
+                            }]
+                    elif is_caf_query and "CAFETERIA" not in executed_categories and not any("cafeteria" in n.lower() for n in executed_tool_names):
+                        caf_tools = tool_registry.get_tools_by_category("CAFETERIA")
+                        caf_tool = caf_tools[0] if caf_tools else (tool_registry.get_tool("api_getCafeteriaMenu") or tool_registry.get_tool("getCafeteriaMenu"))
+                        if caf_tool:
+                            logger.info(f"Deterministic Multi-Hop: Chaining to {caf_tool.name} for unfulfilled cafeteria intent")
+                            yield AgentStreamEvent(
+                                event_type="THINKING",
+                                thinking=f"사용자의 복합 질문에 포함된 학식 식단 정보를 확인하기 위해 {caf_tool.name}을 호출합니다.",
+                            )
+                            from uuid import uuid4
+                            tool_calls = [{
+                                "id": f"call_auto_caf_{uuid4().hex[:6]}",
+                                "type": "function",
+                                "function": {
+                                    "name": caf_tool.name,
+                                    "arguments": {"cafeteria": "학생식당"},
+                                }
+                            }]
+                    elif is_weather_query and "WEATHER" not in executed_categories and not any("weather" in n.lower() for n in executed_tool_names):
+                        w_tools = tool_registry.get_tools_by_category("WEATHER")
+                        w_tool = w_tools[0] if w_tools else tool_registry.get_tool("api_getWeather")
+                        if w_tool:
+                            logger.info(f"Deterministic Multi-Hop: Chaining to {w_tool.name} for unfulfilled weather intent")
+                            yield AgentStreamEvent(
+                                event_type="THINKING",
+                                thinking=f"사용자의 복합 질문에 포함된 캠퍼스 날씨 정보를 확인하기 위해 {w_tool.name}을 호출합니다.",
+                            )
+                            from uuid import uuid4
+                            tool_calls = [{
+                                "id": f"call_auto_weather_{uuid4().hex[:6]}",
+                                "type": "function",
+                                "function": {
+                                    "name": w_tool.name,
+                                    "arguments": {},
+                                }
+                            }]
+                    else:
+                        # No more tools needed, proceed to final response
+                        break
+
 
             # Deduplication & Loop Prevention Guardrail:
             # 1. Check if all proposed tool calls in this hop are identical repeats of already executed calls
@@ -692,6 +760,9 @@ class AgentOrchestrator:
         summary_out = ""
         ac_data_out = {}
         rag_data_out = None
+        domain_data = None
+        is_timetable_tool = tool.category == "TIMETABLE" or "timetable" in tool.name.lower() or "sukang" in tool.name.lower() or "tlsn" in tool.name.lower()
+
 
         logger.info(f"[TOOL_EXEC_START] tool={tool.name} category={tool.category} args={tool_args}")
 
@@ -1094,7 +1165,24 @@ class AgentOrchestrator:
             status_title = f"{tool_display_name} 확인 완료"
 
             try:
-                res = await tool.execute(final_args, exec_context)
+                # If TIMETABLE tool and client_context already has timetable data, use client_context directly!
+                if (tool.category == "TIMETABLE" or is_timetable_tool) and not domain_data:
+                    c_ctx = request.client_context or {}
+                    ctx_tt = (
+                        c_ctx.get("studentTimetable")
+                        or c_ctx.get("timetable")
+                        or c_ctx.get("todayClasses")
+                        or c_ctx.get("courses")
+                        or c_ctx.get("tlsnTimetable")
+                    )
+                    if ctx_tt and isinstance(ctx_tt, (list, dict)):
+                        domain_data = ctx_tt
+                        res = ctx_tt
+                    else:
+                        res = await tool.execute(final_args, exec_context)
+                else:
+                    res = await tool.execute(final_args, exec_context)
+
                 if isinstance(res, dict) and "error" in res:
                     err_msg = res.get("error", "알 수 없는 통신 오류")
                     is_val_err = res.get("is_validation_error") or ("올바르지 않습니다" in err_msg or "파라미터" in err_msg)
@@ -1107,6 +1195,26 @@ class AgentOrchestrator:
                             f"💡 [자가 수정(Self-Correction) 지침]: 도구 파라미터가 유효하지 않아 호출에 실패했습니다. "
                             f"위 오류 메시지와 도구 스키마(inputSchema)의 허용 값/형식을 확인하고, 올바른 값으로 즉시 수정하여 도구를 다시 호출하세요.\n"
                         )
+                    elif is_timetable_tool or tool.category == "TIMETABLE":
+                        # TIMETABLE failure or 401 is NOT a fatal system crash! It simply means no registered timetable or auth needed in current session.
+                        status_state = "empty"
+                        status_title = f"{tool_display_name} 결과 없음"
+                        summary_out = (
+                            "\n[INTIP 인팁 시간표 조회 결과]:\n"
+                            "- 오늘 등록된 수업/강의 일정이 없습니다 (또는 인팁 앱에 시간표가 등록되어 있지 않습니다).\n"
+                            "💡 지침: 학생에게 오늘 예정된 수업이 없거나 시간표가 등록되지 않았음을 친절히 안내하고, '인팁 앱의 [시간표] 탭에서 이번 학기 시간표를 추가하거나 확인할 수 있어요'라고 안내하세요.\n"
+                            "⚠️ 최우선 복합 질의 지침: 사용자가 함께 질문한 다른 내용(예: 버스 도착 정보, 학식, 날씨, 공지 등)이 있다면 절대로 포기하지 말고 해당 도구를 계속 호출하여 정상적으로 안내를 완료하세요!\n"
+                        )
+                        if "TIMETABLE" not in emitted_cards:
+                            fallback_card = CardSynthesizer.synthesize_for_domain(
+                                domain="TIMETABLE",
+                                tool_name=tool.name,
+                                data=None,
+                                query=request.message,
+                            )
+                            if fallback_card:
+                                yield (AgentStreamEvent(event_type="CARD", card=fallback_card), "", None, None)
+                                emitted_cards.add("TIMETABLE")
                     else:
                         status_state = "failed"
                         status_title = f"{tool_display_name} 조회 실패"
@@ -1114,7 +1222,10 @@ class AgentOrchestrator:
                             f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 서버 응답 지연 또는 오류({err_msg})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
                             f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보(식단 메뉴, 버스 도착 시간, 전화번호, 시간표 등)를 지어내지 말고, "
                             f"'현재 교내 시스템 일시 오류로 실시간 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
+                            f"⚠️ 최우선 복합 질의 지침: 해당 도구의 실패로 인해 사용자가 함께 질문한 다른 독립적인 질문(예: 버스 도착 정보, 식단, 날씨, 공지 등)의 조회를 절대로 포기하거나 함께 중단하지 마십시오! "
+                            f"실패한 도구에 대해서만 오류 사실을 안내하고, 사용자가 함께 요청한 나머지 질문에 대해서는 반드시 해당 도구(예: 버스 도착 정보 조회 등)를 끝까지 호출하여 정상적으로 답변을 완료해야 합니다.\n"
                         )
+
                 elif res is not None:
                     if tool.category == "BUS":
                         mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
@@ -1324,6 +1435,7 @@ class AgentOrchestrator:
                                 "- 오늘 등록된 수업/강의 일정이 없습니다 (또는 인팁 앱에 시간표가 등록되어 있지 않습니다).\n"
                                 "💡 지침: 학생에게 오늘 예정된 수업이 없거나 시간표가 등록되지 않았음을 친절히 안내하고, '인팁 앱의 [시간표] 탭에서 이번 학기 시간표를 추가하거나 확인할 수 있어요'라고 안내하세요.\n"
                                 "⚠️ 중요: 이 기능은 인팁(INTIP) 앱 자체의 시간표 기능이므로, 포털/LMS 계정 연동을 절대 요구하지 마세요.\n"
+                                "⚠️ 최우선 복합 질의 지침: 사용자가 함께 질문한 다른 내용(예: 버스 도착 정보 등)이 있다면 절대로 포기하지 말고 해당 도구를 계속 호출하여 완료하세요.\n"
                             )
                         else:
                             status_state = "completed"
@@ -1332,6 +1444,7 @@ class AgentOrchestrator:
                                 f"\n[INTIP 인팁 오늘의 수업 시간표]:\n"
                                 f"{json.dumps(classes, ensure_ascii=False)[:1000]}\n"
                                 f"💡 지침: 학생에게 오늘 수업 시간과 강의실을 명확히 안내하고, 하단의 [나의 수업 시간표] 카드에서 전체 시간표를 확인할 수 있다고 덧붙이세요.\n"
+                                f"⚠️ 최우선 복합 질의 지침: 사용자가 함께 질문한 다른 내용(예: 버스 도착 정보 등)이 있다면 절대로 포기하지 말고 해당 도구를 계속 호출하여 완료하세요.\n"
                             )
                     elif tool.category == "REMINDER":
                         tool_data = res

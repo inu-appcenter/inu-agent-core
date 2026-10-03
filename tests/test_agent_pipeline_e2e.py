@@ -727,3 +727,107 @@ async def test_e2e_fallback_cross_search_when_course_offerings_failed():
         full_text = "".join(tokens)
         assert "인공지능개론" in full_text
 
+
+@pytest.mark.asyncio
+async def test_e2e_composite_timetable_and_bus_recovery():
+    """Verify that when a user asks a composite query (e.g. today's timetable + bus to station),
+    if the timetable tool returns 401/unauthenticated, the agent does NOT surrender with a fatal system crash;
+    it provides clean timetable status and deterministically continues to execute the bus arrival tool!"""
+    await tool_registry.initialize_all_tools()
+    orchestrator = AgentOrchestrator()
+    request = ChatRequest(
+        message="오늘 내 수업 언제 끝나는지 보고 인천대입구역 가는 버스 지금 오는지 확인해줘",
+        history=[],
+    )
+
+    tt_tool = tool_registry.get_tool("api_getTimeTables") or tool_registry.get_tool("api_getTodayTimeTable") or tool_registry.get_tool("getTodayTimeTable")
+    bus_tool = tool_registry.get_tool("api_getBusArrivals") or tool_registry.get_tool("getBusArrivals")
+
+    assert tt_tool is not None, "Timetable tool should be registered"
+    assert bus_tool is not None, "Bus tool should be registered"
+
+    responses = [
+        # Hop 1: Model calls timetable tool
+        {
+            "thought": "오늘 수업 종료 시간을 확인하기 위해 시간표 조회를 호출합니다.",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_tt_1",
+                    "type": "function",
+                    "function": {
+                        "name": tt_tool.name,
+                        "arguments": {},
+                    },
+                }
+            ],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 2: Model returns no tool calls -> Orchestrator detects unfulfilled bus intent and chains to api_getBusArrivals!
+        {
+            "thought": "시간표 확인 후 인천대입구역 방면 버스 조회를 진행합니다.",
+            "content": "",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 3: Model synthesizes final response addressing BOTH timetable and bus
+        {
+            "thought": "시간표 결과(미등록)와 인천대입구역 버스 도착 정보를 종합하여 안내합니다.",
+            "content": "안내 완료",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": "완료"},
+        },
+    ]
+
+
+    async def mock_tt_exec(args, ctx):
+        # 401 Unauthorized from server
+        return {"error": "API request failed with status 401", "details": "Unauthorized"}
+
+    async def mock_bus_exec(args, ctx):
+        return {
+            "summary": "인천대입구역 방면: 8번 버스 5분 후 도착 예정 (2개 정류장 전)",
+            "rawData": {
+                "bstopId": "164000395",
+                "stopName": "자연과학대학(인천대입구역 방면)",
+                "validRoutes": ["8", "16", "58", "순환41"],
+                "items": [
+                    {
+                        "routeNo": "8",
+                        "predictTime1": 5,
+                        "locationNo1": 2,
+                    }
+                ],
+            },
+        }
+
+    async def mock_stream_chat(messages):
+        yield "오늘 등록된 수업은 없으며, 인천대입구역 방면 8번 버스가 약 5분 후 도착 예정입니다."
+
+    with patch.object(tt_tool, "execute", side_effect=mock_tt_exec), \
+         patch.object(bus_tool, "execute", side_effect=mock_bus_exec), \
+         patch("app.orchestrator.engine.llm_client.chat_with_tools", side_effect=responses), \
+         patch("app.orchestrator.engine.llm_client.stream_chat", side_effect=mock_stream_chat):
+
+
+        events = []
+        async for ev in orchestrator.run_stream(request):
+            events.append(ev)
+
+        event_types = [e.event_type for e in events]
+        assert "THINKING" in event_types
+        assert "TOKEN" in event_types
+        assert "DONE" in event_types
+
+        # Verify fallback chaining thought for bus was emitted
+        thinking_texts = [e.thinking for e in events if e.event_type == "THINKING" and e.thinking]
+        assert any("버스" in t for t in thinking_texts)
+        assert any("인천대입구" in t or "164000395" in t or "api_getBusArrivals" in t for t in thinking_texts)
+
+        # Verify final text tokens contain BOTH timetable guidance and bus arrival
+        tokens = [e.content for e in events if e.event_type == "TOKEN" and e.content]
+        full_text = "".join(tokens)
+        assert "등록된 수업" in full_text or "시간표" in full_text
+        assert "8번 버스" in full_text or "5분" in full_text
+
+
