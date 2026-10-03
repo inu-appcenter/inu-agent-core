@@ -50,10 +50,14 @@ class OpenApiTool(BaseTool):
         base_url = settings.INU_PORTAL_SERVER_URL.rstrip("/")
         url_path = self.path
 
-        # 1. Path parameter substitution (e.g. /api/timetables/{timeTableId})
+        # 1. Parameter schema coercion
+        from app.tools.coercer import SchemaCoercer
+        coerced_arguments = SchemaCoercer.coerce(self.parameters_schema, arguments)
+
+        # 2. Path parameter substitution (e.g. /api/timetables/{timeTableId})
         path_vars = re.findall(r"\{([a-zA-Z0-9_]+)\}", self.path)
         query_params = {}
-        for k, v in arguments.items():
+        for k, v in coerced_arguments.items():
             if k in path_vars:
                 url_path = url_path.replace(f"{{{k}}}", str(v))
             else:

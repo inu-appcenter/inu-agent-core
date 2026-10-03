@@ -152,11 +152,14 @@ class McpConnector:
                     input_schema = dict(input_schema or {"type": "object", "properties": {}})
                     props = dict(input_schema.get("properties", {}))
                     name_upper = name.upper()
-                    if "UNIFIED_SEARCH" in name_upper and not props:
-                        props["q"] = {
-                            "type": "string",
-                            "description": "교내 통합 검색어 (공지사항, 학사일정, 교수/학과 연락처 등)",
-                        }
+                    if "UNIFIED_SEARCH" in name_upper:
+                        if "q" in props:
+                            props["q"]["description"] = "교내 통합 검색어 (공지사항, 학사일정, 교수/학과 연락처 등)"
+                        else:
+                            props["q"] = {
+                                "type": "string",
+                                "description": "교내 통합 검색어 (공지사항, 학사일정, 교수/학과 연락처 등)",
+                            }
                         input_schema["required"] = ["q"]
                     elif "LOST_PROPERTY" in name_upper and not props:
                         props["query"] = {

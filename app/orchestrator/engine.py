@@ -168,6 +168,7 @@ class AgentOrchestrator:
         successful_search_queries = set()
         failed_tool_categories: Dict[str, str] = {}
         empty_directory_queries: Set[str] = set()
+        empty_tool_categories: Dict[str, str] = {}
         directory_found_results: bool = False
 
         # 3. Native Tool Calling ReAct Loop (Autonomous Multi-Hop with Streaming Thought)
@@ -306,6 +307,31 @@ class AgentOrchestrator:
                         }]
                     else:
                         break
+                elif any(cat in failed_tool_categories or cat in empty_tool_categories for cat in ["NOTICE", "SCHEDULE", "CLUB", "LOST_PROPERTY", "TIMETABLE_GAP"]) and "SEARCH" not in executed_categories:
+                    search_tools = tool_registry.get_tools_by_category("SEARCH")
+                    search_tool = search_tools[0] if search_tools else (
+                        tool_registry.get_tool("api_unified_search") or tool_registry.get_tool("unifiedSearch") or tool_registry.get_tool("unified_search")
+                    )
+                    if search_tool:
+                        hit_cat = next(cat for cat in ["NOTICE", "SCHEDULE", "CLUB", "LOST_PROPERTY", "TIMETABLE_GAP"] if cat in failed_tool_categories or cat in empty_tool_categories)
+                        fallback_q = failed_tool_categories.get(hit_cat) or empty_tool_categories.get(hit_cat) or request.message
+                        clean_q = AgentRouter._clean_entity_query(fallback_q) or fallback_q
+                        logger.info(f"Deterministic Multi-Hop: Chaining from empty/failed {hit_cat} to {search_tool.name} for query '{clean_q}'")
+                        yield AgentStreamEvent(
+                            event_type="THINKING",
+                            thinking=f"해당 분야({hit_cat})에서 결과를 찾지 못해, 인천대학교 전 도메인 고도화 통합 검색({search_tool.name})을 통해 '{clean_q}' 관련 정보를 추가 탐색합니다.",
+                        )
+                        from uuid import uuid4
+                        tool_calls = [{
+                            "id": f"call_auto_search_{uuid4().hex[:6]}",
+                            "type": "function",
+                            "function": {
+                                "name": search_tool.name,
+                                "arguments": {"q": clean_q, "query": clean_q},
+                            }
+                        }]
+                    else:
+                        break
                 else:
                     # No more tools needed, proceed to final response
                     break
@@ -422,9 +448,11 @@ class AgentOrchestrator:
                             if st_state == "failed":
                                 q_val = fn_args.get("query") or fn_args.get("q") or request.message
                                 failed_tool_categories[target_tool.category.upper()] = str(q_val)
-                            elif st_state == "empty" and target_tool.category.upper() == "DIRECTORY":
+                            elif st_state == "empty":
                                 q_val = fn_args.get("query") or fn_args.get("q") or request.message
-                                empty_directory_queries.add(str(q_val))
+                                empty_tool_categories[target_tool.category.upper()] = str(q_val)
+                                if target_tool.category.upper() == "DIRECTORY":
+                                    empty_directory_queries.add(str(q_val))
                             elif st_state == "completed" and target_tool.category.upper() == "DIRECTORY":
                                 directory_found_results = True
                     if summary:
@@ -504,9 +532,11 @@ class AgentOrchestrator:
                     inuchat_tool = t
                     break
 
+            tokens_emitted = 0
             if inuchat_tool and hasattr(inuchat_tool, "stream_execute"):
                 async for token, is_done, full_acc, citations in inuchat_tool.stream_execute({"question": inu_question}):
                     if token:
+                        tokens_emitted += 1
                         yield AgentStreamEvent(event_type="TOKEN", content=token)
                     if is_done and citations and "INU_AI_KNOWLEDGE" not in emitted_cards:
                         card = CardSynthesizer.synthesize_for_domain(
@@ -517,6 +547,12 @@ class AgentOrchestrator:
                         if card:
                             yield AgentStreamEvent(event_type="CARD", card=card)
                             emitted_cards.add("INU_AI_KNOWLEDGE")
+
+                if tokens_emitted == 0:
+                    yield AgentStreamEvent(
+                        event_type="TOKEN",
+                        content="인천대학교 공식 학사 규정 지식베이스 조회를 완료하였습니다.",
+                    )
 
                 yield AgentStreamEvent(event_type="DONE")
                 return
@@ -536,6 +572,11 @@ class AgentOrchestrator:
                 status_title="단말기 보안 영역에서 학교 공식 시스템 데이터를 안전하게 확인 중입니다...",
                 status_category=first_action_cat,
                 status_state="running",
+            )
+            # Zero-Silence Guarantee: Always stream informative guidance tokens so the chat UI never stays blank while awaiting callback
+            yield AgentStreamEvent(
+                event_type="TOKEN",
+                content="🔒 단말기 보안 영역(P2P)에서 학교 공식 시스템과 안전하게 통신하여 최신 학적 데이터를 확인하고 있습니다. 잠시만 기다려 주세요...",
             )
             yield AgentStreamEvent(event_type="DONE")
             return
@@ -579,8 +620,14 @@ class AgentOrchestrator:
                 f"Starting synthesis stream for '{request.message[:30]}...' (Categories: {executed_categories})"
             )
 
+            tokens_emitted = 0
             async for token in llm_client.stream_chat(messages=synthesis_messages):
+                tokens_emitted += 1
                 yield AgentStreamEvent(event_type="TOKEN", content=token)
+
+            if tokens_emitted == 0:
+                fallback_msg = "조회된 정보를 확인하였으나 세부 안내 문장을 생성하지 못했습니다. 질문을 다시 한번 입력해 주세요."
+                yield AgentStreamEvent(event_type="TOKEN", content=fallback_msg)
 
             # Debug metadata event for troubleshooting and diagnostic trace
             if client_ctx.get("debug") or client_ctx.get("show_debug"):
@@ -1378,7 +1425,13 @@ class AgentOrchestrator:
 
                         mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
                         lines = [f"\n[인천대학교 학사일정 조회 결과 ({tool_display_name})]:"]
-                        if sched_list or mcp_summary:
+                        is_empty = False
+                        if not sched_list and not mcp_summary:
+                            is_empty = True
+                        elif mcp_summary and any(kw in mcp_summary for kw in ["없습니다", "찾지 못했습니다", "0건", "없음", "일정이 없습니다"]) and not sched_list:
+                            is_empty = True
+
+                        if not is_empty:
                             status_state = "completed"
                             status_title = f"{tool_display_name} 확인 완료"
                             if sched_list:
@@ -1418,7 +1471,13 @@ class AgentOrchestrator:
 
                         mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
                         lines = [f"\n[인천대학교 공지사항 조회 결과 ({tool_display_name})]:"]
-                        if notices_list or mcp_summary:
+                        is_empty_notice = False
+                        if not notices_list and not mcp_summary:
+                            is_empty_notice = True
+                        elif mcp_summary and any(kw in mcp_summary for kw in ["없습니다", "찾지 못했습니다", "0건", "없음"]) and not notices_list:
+                            is_empty_notice = True
+
+                        if not is_empty_notice:
                             status_state = "completed"
                             status_title = f"{tool_display_name} 확인 완료"
                             if notices_list:
@@ -1989,8 +2048,15 @@ class AgentOrchestrator:
         })
 
         try:
+            tokens_emitted = 0
             async for token in llm_client.stream_chat(messages=synthesis_messages):
+                tokens_emitted += 1
                 yield AgentStreamEvent(event_type="TOKEN", content=token)
+            if tokens_emitted == 0:
+                yield AgentStreamEvent(
+                    event_type="TOKEN",
+                    content="학교 시스템 데이터 조회를 완료하였습니다.",
+                )
             yield AgentStreamEvent(event_type="DONE")
         except Exception as e:
             logger.error(f"[ACTION_RESUME_ERROR] Synthesis error: {e}", exc_info=True)

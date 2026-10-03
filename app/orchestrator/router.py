@@ -218,6 +218,23 @@ class AgentRouter:
         if not query:
             return ""
         cleaned = query.strip()
+        cleaned = re.sub(r"[?!.,~]+$", "", cleaned).strip()
+
+        # Remove conversational ending phrases (e.g. 관련해서 전체 검색 좀 해줘, 알려줘, 뭐야)
+        filler_pattern = re.compile(
+            r"(?:관련해서\s*전체\s*검색\s*(?:좀\s*)?(?:해줘|해\s*주세요|부탁해)?|"
+            r"관련\s*전체\s*검색\s*(?:좀\s*)?(?:해줘|해\s*주세요|부탁해)?|"
+            r"전체\s*검색\s*(?:좀\s*)?(?:해줘|해\s*주세요|부탁해)?|"
+            r"관련해서\s*(?:검색|조회|확인|찾아|알려)\s*(?:해줘|해\s*주세요|줘)?|"
+            r"관련된\s*(?:정보\s*)?(?:검색|조회|확인|찾아|알려)\s*(?:해줘|해\s*주세요|줘)?|"
+            r"관련\s*(?:정보\s*)?(?:검색|조회|확인|찾아|알려)\s*(?:해줘|해\s*주세요|줘)?|"
+            r"에\s*대해(?:서)?\s*(?:알려줘|찾아줘|알려주세요|검색해줘)?|"
+            r"(?:좀\s*)?(?:알려줘|알려주세요|찾아줘|찾아주세요|검색해줘|검색해\s*주세요|조회해줘|조회해\s*주세요|확인해줘|확인해\s*주세요|보여줘|보여주세요)|"
+            r"(?:알고\s*싶어|알고\s*싶어요|알고\s*싶습니다)|"
+            r"(?:뭐야|어디야|어떻게\s*돼|어떻게\s*되나요|어디에\s*있어|어디에\s*있나요))$"
+        )
+        cleaned = filler_pattern.sub("", cleaned).strip()
+
         pattern = re.compile(r"(?:교수님|교수|선생님|조교님|학부장님|학과장님|과사|연구실|사무실|연락처|전화번호|이메일|메일|번호)$")
         changed = True
         while changed and len(cleaned) >= 2:
@@ -226,7 +243,7 @@ class AgentRouter:
                 cleaned = cleaned[:m.start()].strip()
             else:
                 changed = False
-        return cleaned
+        return cleaned or query.strip()
 
     @classmethod
     async def decide_initial_plan(

@@ -497,3 +497,133 @@ async def test_e2e_fallback_cross_search_when_directory_empty():
         assert "032-835-8900" in full_text
         assert "정보기술대학" in full_text
 
+
+@pytest.mark.asyncio
+async def test_e2e_zero_silence_token_emission_in_p2p_action_wait():
+    """Verify that when a client P2P action (e.g. academic record) is dispatched in Native App,
+    the agent NEVER terminates in silence (0 tokens); it immediately streams an informative token
+    explaining that secure on-device retrieval is underway."""
+    await tool_registry.initialize_all_tools()
+    orchestrator = AgentOrchestrator()
+    request = ChatRequest(
+        message="내 성적 및 취득학점 조회해줘",
+        history=[],
+        client_context={
+            "isApp": True,
+            "portal": {"linked": True},
+        },
+    )
+
+    responses = [
+        # Hop 1: Model calls action_portal_get_academic_record
+        {
+            "thought": "사용자의 학적 및 성적을 조회하기 위해 action_portal_get_academic_record를 호출합니다.",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_acad_p2p_1",
+                    "type": "function",
+                    "function": {
+                        "name": "action_portal_get_academic_record",
+                        "arguments": {},
+                    },
+                }
+            ],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+    ]
+
+    with patch("app.orchestrator.engine.llm_client.chat_with_tools", side_effect=responses):
+        events = []
+        async for ev in orchestrator.run_stream(request):
+            events.append(ev)
+
+        event_types = [e.event_type for e in events]
+        assert "ACTION_REQUIRED" in event_types
+        assert "STATUS" in event_types
+        assert "TOKEN" in event_types
+        assert "DONE" in event_types
+
+        # Verify token content informs user about P2P secure retrieval
+        tokens = [e.content for e in events if e.event_type == "TOKEN" and e.content]
+        assert len(tokens) >= 1
+        full_text = "".join(tokens)
+        assert "단말기 보안 영역" in full_text
+        assert "잠시만 기다려 주세요" in full_text
+
+
+@pytest.mark.asyncio
+async def test_e2e_fallback_cross_search_when_notice_empty():
+    """Verify that when notice search returns empty, the agent autonomously falls back to unified search."""
+    await tool_registry.initialize_all_tools()
+    orchestrator = AgentOrchestrator()
+    request = ChatRequest(
+        message="수강신청 관련 공지 검색해줘",
+        history=[],
+    )
+
+    responses = [
+        # Hop 1: Notice tool returns empty
+        {
+            "thought": "수강신청 관련 공지사항을 확인하기 위해 api_notice를 호출합니다.",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_notice_empty_1",
+                    "type": "function",
+                    "function": {
+                        "name": "api_notice",
+                        "arguments": {"query": "수강신청"},
+                    },
+                }
+            ],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 2: Model returns no tool calls -> Orchestrator chains to unifiedSearch
+        {
+            "thought": "공지사항 검색 결과가 없습니다.",
+            "content": "",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 3: Model synthesizes final response
+        {
+            "thought": "통합 검색 결과를 바탕으로 수강신청 일정과 공지를 안내합니다.",
+            "content": "안내 완료",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": "완료"},
+        },
+    ]
+
+    async def mock_stream_chat(messages):
+        yield "2026학년도 수강신청 일정 및 공지 안내입니다."
+
+    notice_tool = tool_registry.get_tool("api_notice")
+    search_tool = tool_registry.get_tool("unifiedSearch") or tool_registry.get_tool("api_unified_search")
+
+    async def mock_notice_exec(args, ctx):
+        return {"summary": "조회된 공지사항이 없습니다.", "items": []}
+
+    async def mock_search_exec(args, ctx):
+        return {
+            "summary": "수강신청 공지 (2026-1학기 수강신청 기간: 2월 10일 ~ 2월 14일)",
+            "rawData": {"totalCount": 1, "notices": {"items": [{"title": "2026학년도 1학기 수강신청 안내"}]}}
+        }
+
+    with patch.object(notice_tool, "execute", side_effect=mock_notice_exec), \
+         patch.object(search_tool, "execute", side_effect=mock_search_exec), \
+         patch("app.orchestrator.engine.llm_client.chat_with_tools", side_effect=responses), \
+         patch("app.orchestrator.engine.llm_client.stream_chat", side_effect=mock_stream_chat):
+
+        events = []
+        async for ev in orchestrator.run_stream(request):
+            events.append(ev)
+
+        event_types = [e.event_type for e in events]
+        assert "TOKEN" in event_types
+        assert "DONE" in event_types
+
+        # Verify fallback chaining thought
+        thinking_texts = [e.thinking for e in events if e.event_type == "THINKING" and e.thinking]
+        assert any("통합 검색" in t for t in thinking_texts)
+
