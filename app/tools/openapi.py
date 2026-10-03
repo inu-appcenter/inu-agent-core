@@ -238,6 +238,12 @@ class OpenApiConnector:
             return "RESERVATION"
         if "/weather" in p or "weather" in tag_str:
             return "WEATHER"
+        if "/course" in p or "course" in tag_str:
+            return "COURSE"
+        if "/club" in p or "club" in tag_str:
+            return "CLUB"
+        if "/lost" in p or "lost" in tag_str:
+            return "LOST_PROPERTY"
         if "/search" in p or "search" in tag_str:
             return "SEARCH"
         return "INTIP"

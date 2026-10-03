@@ -17,9 +17,15 @@ from app.llm.embeddings import get_embeddings, FastEmbedBackend, MockEmbeddingBa
 def serialize_tool(tool: BaseTool) -> str:
     """
     Serialize a BaseTool instance into a clean semantic document for vector embedding.
-    Uses the tool's natural human-readable description.
+    Uses the tool's natural human-readable description and detailed description.
     """
-    return (tool.description or tool.name).strip()
+    parts = [tool.description or tool.name]
+    if hasattr(tool, "detail_desc") and getattr(tool, "detail_desc", None):
+        detail = str(tool.detail_desc).strip()
+        if detail and detail != tool.description:
+            parts.append(detail)
+    return " - ".join(parts).strip()
+
 
 
 def extract_tool_keywords(tool: BaseTool) -> str:

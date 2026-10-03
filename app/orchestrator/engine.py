@@ -307,19 +307,26 @@ class AgentOrchestrator:
                         }]
                     else:
                         break
-                elif any(cat in failed_tool_categories or cat in empty_tool_categories for cat in ["NOTICE", "SCHEDULE", "CLUB", "LOST_PROPERTY", "TIMETABLE_GAP"]) and "SEARCH" not in executed_categories:
+                elif any(cat in failed_tool_categories or cat in empty_tool_categories for cat in ["COURSE", "NOTICE", "SCHEDULE", "CLUB", "LOST_PROPERTY", "TIMETABLE_GAP", "INTIP"]) and "SEARCH" not in executed_categories:
                     search_tools = tool_registry.get_tools_by_category("SEARCH")
                     search_tool = search_tools[0] if search_tools else (
                         tool_registry.get_tool("api_unified_search") or tool_registry.get_tool("unifiedSearch") or tool_registry.get_tool("unified_search")
                     )
                     if search_tool:
-                        hit_cat = next(cat for cat in ["NOTICE", "SCHEDULE", "CLUB", "LOST_PROPERTY", "TIMETABLE_GAP"] if cat in failed_tool_categories or cat in empty_tool_categories)
+                        hit_cat = next(cat for cat in ["COURSE", "NOTICE", "SCHEDULE", "CLUB", "LOST_PROPERTY", "TIMETABLE_GAP", "INTIP"] if cat in failed_tool_categories or cat in empty_tool_categories)
                         fallback_q = failed_tool_categories.get(hit_cat) or empty_tool_categories.get(hit_cat) or request.message
                         clean_q = AgentRouter._clean_entity_query(fallback_q) or fallback_q
                         logger.info(f"Deterministic Multi-Hop: Chaining from empty/failed {hit_cat} to {search_tool.name} for query '{clean_q}'")
+                        if hit_cat == "COURSE":
+                            thinking_msg = f"개설 강의 직접 조회에 실패하거나 결과가 없어, 인천대학교 전 도메인 고도화 통합 검색({search_tool.name})을 통해 '{clean_q}' 관련 개설 강의 및 수업 정보를 대체 탐색합니다."
+                            search_args = {"q": clean_q, "query": clean_q, "tab": "COURSE"}
+                        else:
+                            thinking_msg = f"해당 분야({hit_cat})에서 결과를 찾지 못해, 인천대학교 전 도메인 고도화 통합 검색({search_tool.name})을 통해 '{clean_q}' 관련 정보를 추가 탐색합니다."
+                            search_args = {"q": clean_q, "query": clean_q}
+
                         yield AgentStreamEvent(
                             event_type="THINKING",
-                            thinking=f"해당 분야({hit_cat})에서 결과를 찾지 못해, 인천대학교 전 도메인 고도화 통합 검색({search_tool.name})을 통해 '{clean_q}' 관련 정보를 추가 탐색합니다.",
+                            thinking=thinking_msg,
                         )
                         from uuid import uuid4
                         tool_calls = [{
@@ -327,7 +334,7 @@ class AgentOrchestrator:
                             "type": "function",
                             "function": {
                                 "name": search_tool.name,
-                                "arguments": {"q": clean_q, "query": clean_q},
+                                "arguments": search_args,
                             }
                         }]
                     else:
@@ -1687,6 +1694,55 @@ class AgentOrchestrator:
                             status_state = "completed"
                             status_title = f"{tool_display_name} 확인 완료"
                             summary_out = f"\n[공강 시간 분석 결과]:\n{mcp_summary}\n"
+                    elif tool.category == "COURSE":
+                        tool_data = res
+                        courses = []
+                        if isinstance(res, list):
+                            courses = res
+                        elif isinstance(res, dict):
+                            courses = (
+                                res.get("rawData")
+                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
+                                or res.get("contents")
+                                or res.get("items")
+                                or (res.get("content") if isinstance(res.get("content"), list) else [])
+                                or []
+                            )
+                        if isinstance(courses, dict):
+                            courses = [courses]
+
+                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                        lines = [f"\n[인천대학교 개설 강의/수업 조회 결과 ({tool_display_name})]:"]
+                        is_empty_course = False
+                        if not courses and not mcp_summary:
+                            is_empty_course = True
+                        elif mcp_summary and any(kw in mcp_summary for kw in ["없습니다", "찾지 못했습니다", "0건", "없음"]) and not courses:
+                            is_empty_course = True
+
+                        if not is_empty_course:
+                            status_state = "completed"
+                            status_title = f"{tool_display_name} 확인 완료"
+                            if courses:
+                                for c in courses[:6]:
+                                    if isinstance(c, dict):
+                                        c_name = c.get("courseName") or c.get("subject") or c.get("title") or "강의"
+                                        prof = c.get("professor") or c.get("prof") or ""
+                                        room = c.get("timeRoom") or c.get("classroom") or ""
+                                        credit = c.get("credit") or c.get("credits") or ""
+                                        details = []
+                                        if prof: details.append(f"교수: {prof}")
+                                        if room: details.append(f"강의실/시간: {room}")
+                                        if credit: details.append(f"{credit}학점")
+                                        det_str = f" ({', '.join(details)})" if details else ""
+                                        lines.append(f"- **{c_name}**{det_str}")
+                            elif mcp_summary:
+                                lines.append(mcp_summary)
+                            lines.append("💡 지침: 위 개설 강의 목록을 사용자에게 친절하고 명확하게 안내하세요. 가상의 과목이나 강의실을 지어내지 마세요.")
+                        else:
+                            status_state = "empty"
+                            status_title = f"{tool_display_name} 결과 없음"
+                            lines.append("- 조회된 개설 강의가 없습니다.")
+                        summary_out = "\n".join(lines) + "\n"
                     else:
                         tool_data = res
                         mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""

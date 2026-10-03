@@ -22,6 +22,11 @@ CAMPUS_SYNONYMS: Dict[str, list[str]] = {
     "27호관식당": ["27호관", "이공계", "이공계식당", "27호관식당메뉴"],
     "사범대식당": ["사범대", "사범관", "사범대식당메뉴"],
     "전체": ["모두", "all", "ALL", "전체식당"],
+    # Semester Terms
+    "FIRST": ["1학기", "1", "first", "FIRST", "10", "1학기수업", "1st"],
+    "SECOND": ["2학기", "2", "second", "SECOND", "20", "2학기수업", "2nd"],
+    "SUMMER": ["여름학기", "여름계절학기", "계절학기", "summer", "30"],
+    "WINTER": ["겨울학기", "겨울계절학기", "winter", "40"],
 }
 
 
@@ -45,7 +50,7 @@ class SchemaCoercer:
 
         coerced = dict(args)
 
-        # 0. Parameter Alias Coercion (e.g. query <-> q)
+        # 0. Parameter Alias Coercion (e.g. query <-> q <-> keyword)
         if "q" in properties and (not coerced.get("q")):
             for alias in ["query", "keyword", "searchWord", "searchTerm", "search"]:
                 if coerced.get(alias):
@@ -56,6 +61,18 @@ class SchemaCoercer:
                 if coerced.get(alias):
                     coerced["query"] = coerced.pop(alias)
                     break
+        elif "keyword" in properties and (not coerced.get("keyword")):
+            for alias in ["q", "query", "searchWord", "searchTerm", "search"]:
+                if coerced.get(alias):
+                    coerced["keyword"] = coerced.pop(alias)
+                    break
+
+        # Academic Year & Term Auto-Defaults
+        if "year" in properties and (not coerced.get("year")):
+            coerced["year"] = datetime.now(timezone(timedelta(hours=9))).year
+        if "term" in properties and (not coerced.get("term")):
+            curr_month = datetime.now(timezone(timedelta(hours=9))).month
+            coerced["term"] = "SECOND" if curr_month >= 7 else "FIRST"
 
         for param, prop in properties.items():
             if param not in coerced:

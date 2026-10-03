@@ -627,3 +627,103 @@ async def test_e2e_fallback_cross_search_when_notice_empty():
         thinking_texts = [e.thinking for e in events if e.event_type == "THINKING" and e.thinking]
         assert any("통합 검색" in t for t in thinking_texts)
 
+
+@pytest.mark.asyncio
+async def test_e2e_fallback_cross_search_when_course_offerings_failed():
+    """Verify that when api_getCourseOfferings fails (e.g. 401 or empty), the agent autonomously falls back to unifiedSearch(tab='COURSE')."""
+    await tool_registry.initialize_all_tools()
+    orchestrator = AgentOrchestrator()
+    request = ChatRequest(
+        message="이번 학기 개설 강의 중에 파이썬이나 인공지능 관련 수업 있어?",
+        history=[],
+    )
+
+    responses = [
+        # Hop 1: Direct course offering tool fails
+        {
+            "thought": "2026학년도 2학기 개설 강의 중 인공지능 또는 파이썬 관련 수업을 조회하기 위해 api_getCourseOfferings를 호출합니다.",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_course_1",
+                    "type": "function",
+                    "function": {
+                        "name": "api_getCourseOfferings",
+                        "arguments": {"year": 2026, "term": "SECOND", "keyword": "인공지능"},
+                    },
+                }
+            ],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 2: Model returns no tool calls after direct tool failure -> Orchestrator chains to unifiedSearch
+        {
+            "thought": "개설 강의 직접 조회에서 결과를 가져오지 못했습니다.",
+            "content": "",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": ""},
+        },
+        # Hop 3: Model synthesizes final response
+        {
+            "thought": "통합 검색 결과를 바탕으로 개설된 인공지능 관련 강의를 안내합니다.",
+            "content": "안내 완료",
+            "tool_calls": [],
+            "raw_message": {"role": "assistant", "content": "완료"},
+        },
+    ]
+
+    async def mock_stream_chat(messages):
+        yield "이번 학기에 개설된 관련 강의로 '인공지능개론(컴퓨터공학부, 3학점)'이 개설되어 있습니다."
+
+    course_tool = tool_registry.get_tool("api_getCourseOfferings")
+    search_tool = tool_registry.get_tool("unifiedSearch") or tool_registry.get_tool("api_unified_search")
+
+    assert course_tool is not None, "api_getCourseOfferings tool should be registered"
+    assert search_tool is not None, "unifiedSearch tool should be registered"
+
+    async def mock_course_exec(args, ctx):
+        # Simulating 401 or empty error response from portal server
+        return {"error": "API request failed with status 401", "details": "Unauthorized"}
+
+    async def mock_search_exec(args, ctx):
+        # Verify fallback chained with COURSE tab
+        assert args.get("tab") == "COURSE"
+        return {
+            "summary": "개설강의 검색 결과 (인공지능개론)",
+            "rawData": {
+                "courses": {
+                    "totalCount": 1,
+                    "items": [
+                        {
+                            "courseName": "인공지능개론",
+                            "professor": "김교수",
+                            "timeRoom": "공7-204",
+                            "credit": 3,
+                        }
+                    ],
+                }
+            },
+        }
+
+    with patch.object(course_tool, "execute", side_effect=mock_course_exec), \
+         patch.object(search_tool, "execute", side_effect=mock_search_exec), \
+         patch("app.orchestrator.engine.llm_client.chat_with_tools", side_effect=responses), \
+         patch("app.orchestrator.engine.llm_client.stream_chat", side_effect=mock_stream_chat):
+
+        events = []
+        async for ev in orchestrator.run_stream(request):
+            events.append(ev)
+
+        event_types = [e.event_type for e in events]
+        assert "THINKING" in event_types
+        assert "TOKEN" in event_types
+        assert "DONE" in event_types
+
+        # Verify fallback chaining thought was emitted
+        thinking_texts = [e.thinking for e in events if e.event_type == "THINKING" and e.thinking]
+        assert any("통합 검색" in t for t in thinking_texts)
+        assert any("개설 강의" in t for t in thinking_texts)
+
+        tokens = [e.content for e in events if e.event_type == "TOKEN" and e.content]
+        full_text = "".join(tokens)
+        assert "인공지능개론" in full_text
+
