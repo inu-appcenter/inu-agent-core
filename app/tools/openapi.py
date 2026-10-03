@@ -111,12 +111,14 @@ class OpenApiTool(BaseTool):
                 if isinstance(data, dict) and "data" in data:
                     data = data["data"]
 
-                # Extract list if inside ListResponseDto (e.g. {"pages": 1, "total": 2, "contents": [...]})
+                # Extract list if inside ListResponseDto or Spring Page (e.g. {"content": [...]} or {"items": [...]})
                 list_payload = None
                 if isinstance(data, list):
                     list_payload = data
                 elif isinstance(data, dict):
-                    if "contents" in data and isinstance(data["contents"], list):
+                    if "content" in data and isinstance(data["content"], list):
+                        list_payload = data["content"]
+                    elif "contents" in data and isinstance(data["contents"], list):
                         list_payload = data["contents"]
                     elif "items" in data and isinstance(data["items"], list):
                         list_payload = data["items"]
@@ -127,11 +129,17 @@ class OpenApiTool(BaseTool):
                         return {
                             "total_count": len(list_payload),
                             "items": list_payload[:6],
+                            "content": list_payload[:6],
                             "contents": list_payload[:6],
                             "notice": f"결과가 많아 상위 6개 항목만 표시합니다. (전체 {len(list_payload)}건)",
                         }
-                    elif isinstance(data, dict) and "contents" in data:
-                        data["items"] = list_payload
+                    elif isinstance(data, dict):
+                        if "content" in data:
+                            data["content"] = list_payload
+                            data["items"] = list_payload
+                        elif "contents" in data:
+                            data["contents"] = list_payload
+                            data["items"] = list_payload
 
                 # Guardrail for Unified Search: truncate each section's items to top 3 to prevent token exhaustion
                 if isinstance(data, dict) and any(k in data for k in ["notices", "departmentNotices", "directory", "schedules", "courses", "clubs", "posts"]):
@@ -177,6 +185,7 @@ class OpenApiConnector:
         """Convert OpenAPI 3.0 paths into OpenApiTool objects"""
         tools: List[OpenApiTool] = []
         paths = spec.get("paths", {})
+        root_security = spec.get("security", [])
 
         for path, path_item in paths.items():
             for method, op in path_item.items():
@@ -197,7 +206,7 @@ class OpenApiConnector:
 
                 tool_name = self._sanitize_tool_name(op_id, path)
                 params_schema = self._build_params_schema(op.get("parameters", []))
-                requires_auth = self._check_auth_required(op)
+                requires_auth = self._check_auth_required(op, root_security=root_security)
 
                 tool = OpenApiTool(
                     name=tool_name,
@@ -260,9 +269,13 @@ class OpenApiConnector:
         return "INTIP"
 
 
-    def _check_auth_required(self, op: Dict[str, Any]) -> bool:
-        security = op.get("security", [])
-        return len(security) > 0
+    def _check_auth_required(self, op: Dict[str, Any], root_security: Optional[List[Dict[str, Any]]] = None) -> bool:
+        op_security = op.get("security")
+        if op_security is not None:
+            return len(op_security) > 0
+        if root_security:
+            return len(root_security) > 0
+        return False
 
     def _build_params_schema(self, parameters: List[Dict[str, Any]]) -> Dict[str, Any]:
         properties = {}
@@ -282,7 +295,10 @@ class OpenApiConnector:
                 "description": p_desc,
             }
             if "enum" in p_schema:
-                prop_def["enum"] = p_schema["enum"]
+                clean_enum = [e for e in p_schema["enum"] if not str(e).startswith("\ufffd")]
+                prop_def["enum"] = clean_enum if clean_enum else p_schema["enum"]
+                if clean_enum and not any(kw in p_desc for kw in ["허용 값", "Enum", "중 하나", "옵션"]):
+                    prop_def["description"] = f"{p_desc} (허용 값: {', '.join(map(str, clean_enum[:10]))})".strip()
             if "default" in p_schema:
                 prop_def["default"] = p_schema["default"]
 
