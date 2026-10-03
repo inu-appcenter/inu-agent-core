@@ -136,7 +136,7 @@ def get_tool_orchestration_prompt(client: str) -> str:
    - **캠퍼스 실시간 날씨**: `api_getWeather`
    - **교내 동아리 목록 및 모집**: `api_getAllClubs` (동아리가 비어있으면 `api_unifiedSearch` 교차 조회)
    - **학내 분실물 습득/신고**: `api_getLostProperties` (결과 부재 시 `api_unifiedSearch` 교차 조회)
-   - **총학생회 공식 공지사항**: `api_getCouncilNotices`
+   - **총학생회 공식 공지사항**: `api_getAllPost_3` (또는 `api_getCouncilNotices`)
    - **학과별 공식 공지사항**: `api_getDepartmentNotices` (department 파라미터는 `COMPUTER_ENGINEERING` 등 영문 enum)
    - **등록금 납부 및 고지서**: `action_portal_get_tuition`
    - **장학금 수혜 내역**: `action_portal_get_scholarship`

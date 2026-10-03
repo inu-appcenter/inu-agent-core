@@ -1677,7 +1677,8 @@ class AgentOrchestrator:
                         else:
                             status_state = "empty"
                             status_title = f"{tool_display_name} 결과 없음"
-                            lines.append("- 조회된 공지사항이 없습니다.")
+                            lines.append(f"- 현재 등록된 {tool_display_name} 게시글이 없습니다 (0건).")
+                            lines.append(f"⚠️ 핵심 지침: 시스템 오류나 서버 응답 지연 핑계를 대지 마십시오. 학생에게 '현재 등록된 {tool_display_name} 내역이 없습니다'라고 사실 그대로 정직하게 안내하세요.")
                         summary_out = "\n".join(lines) + "\n"
                     elif tool.category == "SEARCH" or "unifiedsearch" in tool.name.lower():
                         tool_data = res

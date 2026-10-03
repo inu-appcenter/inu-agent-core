@@ -58,6 +58,8 @@ class DynamicBusMatcher:
 
         # 1. Match from live server route sections first (actual boarding/origin stops like 공대/자연대, 인입런, 지정단런)
         best_score = 0.0
+        from app.tools.coercer import CAMPUS_SYNONYMS
+
         if sections:
             for sec in sections:
                 if not isinstance(sec, dict):
@@ -70,7 +72,16 @@ class DynamicBusMatcher:
                 for cand in [s_alias, s_name, tab_name]:
                     if not cand:
                         continue
-                    if cand.lower() in target_text.lower() or target_text.lower() in cand.lower():
+                    # Check direct or split tokens (e.g. '공대/자연대' -> '공대', '자연대')
+                    cand_tokens = [cand.lower()] + [p.strip().lower() for p in cand.replace("/", " ").split() if p.strip()]
+                    # Check synonyms
+                    for tok in list(cand_tokens):
+                        for canonical, syns in CAMPUS_SYNONYMS.items():
+                            if tok == canonical.lower() or tok in [s.lower() for s in syns]:
+                                cand_tokens.extend([s.lower() for s in syns])
+                                cand_tokens.append(canonical.lower())
+
+                    if any(t in target_text.lower() for t in cand_tokens):
                         matched_bstop_id = s_id
                         resolved_stop_name = s_alias or s_name
                         matched_tab_name = tab_name
@@ -103,7 +114,14 @@ class DynamicBusMatcher:
                 for cand in candidates:
                     if not cand:
                         continue
-                    if cand.lower() in target_text.lower() or target_text.lower() in cand.lower():
+                    cand_tokens = [cand.lower()] + [p.strip().lower() for p in cand.replace("/", " ").replace(",", " ").split() if p.strip()]
+                    for tok in list(cand_tokens):
+                        for canonical, syns in CAMPUS_SYNONYMS.items():
+                            if tok == canonical.lower() or tok in [s.lower() for s in syns]:
+                                cand_tokens.extend([s.lower() for s in syns])
+                                cand_tokens.append(canonical.lower())
+
+                    if any(t in target_text.lower() for t in cand_tokens):
                         matched_bstop_id = bstop_id
                         resolved_stop_name = stop_alias or bstop_name
                         best_score = 1.0
