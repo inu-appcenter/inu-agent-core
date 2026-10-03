@@ -332,8 +332,10 @@ class LLMClient:
                             })
                             return
                         else:
+                            error_body = await response.aread()
+                            err_str = error_body.decode("utf-8", errors="ignore")
                             logger.info(
-                                f"Native streaming tools API returned {response.status_code}. "
+                                f"Native streaming tools API returned {response.status_code}: {err_str[:400]}. "
                                 "Falling back to streaming Prompt ReAct mode..."
                             )
             except Exception as ex:

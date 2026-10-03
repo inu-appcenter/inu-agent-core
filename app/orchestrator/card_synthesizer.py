@@ -33,6 +33,39 @@ class CardSynthesizer:
         """
         domain = domain.upper()
 
+        # Handle MCP remote tools returning auth required components
+        if isinstance(data, dict):
+            ui_comp = data.get("uiComponent")
+            if isinstance(ui_comp, dict):
+                ui_type = ui_comp.get("type")
+                if ui_type == "AUTH_REQUIRED":
+                    link_obj = ui_comp.get("link") or {}
+                    return ComponentCard(
+                        type="AUTH_REQUIRED",
+                        title=ui_comp.get("title") or "로그인이 필요한 서비스예요",
+                        data=ui_comp.get("data") or {},
+                        link=CardLink(
+                            label=link_obj.get("label", "로그인하기"),
+                            route=link_obj.get("route", "/login"),
+                        ),
+                    )
+                elif ui_type == "PORTAL_AUTH_REQUIRED":
+                    return cls._build_portal_auth_card()
+                elif ui_type == "LMS_AUTH_REQUIRED":
+                    return cls._build_lms_auth_card()
+
+            # Universal HTTP 401 Unauthorized handling across all tools
+            if data.get("status_code") == 401 or data.get("auth_required") or "401" in str(data.get("error", "")):
+                return ComponentCard(
+                    type="AUTH_REQUIRED",
+                    title="로그인이 필요한 서비스예요",
+                    data={"message": "해당 학사/강의 정보를 조회하려면 로그인이 필요합니다."},
+                    link=CardLink(
+                        label="로그인하기",
+                        route="/login",
+                    ),
+                )
+
         if domain == "BUS":
             return cls._build_bus_card(data)
         elif domain == "CAFETERIA":
@@ -73,6 +106,10 @@ class CardSynthesizer:
             return cls._build_settings_card(data)
         elif domain in ["SEARCH", "UNIFIED_SEARCH"] or "unifiedsearch" in tool_name.lower() or "search" in tool_name.lower():
             return cls._build_unified_search_card(data, query=query)
+        elif domain in ["CLUB", "API_CLUB_LIST"] or "club" in tool_name.lower():
+            return cls._build_club_card(data)
+        elif domain in ["LOST_PROPERTY", "API_LOST_PROPERTY"] or "lost" in tool_name.lower():
+            return cls._build_lost_property_card(data)
 
         return None
 
@@ -87,9 +124,10 @@ class CardSynthesizer:
         stop_name = "인천대입구역"
 
         if isinstance(data, dict):
-            arrivals = data.get("arrivals") or []
-            valid_routes = data.get("validRoutes") or []
-            stop_name = data.get("stopName") or data.get("tabName") or "버스 정류장"
+            bus_raw = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+            arrivals = data.get("arrivals") or bus_raw.get("arrivals") or []
+            valid_routes = data.get("validRoutes") or bus_raw.get("validRoutes") or []
+            stop_name = data.get("stopName") or data.get("tabName") or bus_raw.get("stopName") or bus_raw.get("tabName") or "버스 정류장"
         elif isinstance(data, list):
             arrivals = data
 
@@ -187,7 +225,7 @@ class CardSynthesizer:
         if isinstance(data, list):
             raw_list = data
         elif isinstance(data, dict):
-            raw_list = data.get("data") or data.get("cafeterias") or data.get("menus") or data.get("items") or []
+            raw_list = data.get("rawData") or data.get("data") or data.get("cafeterias") or data.get("menus") or data.get("items") or (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else []) or []
             if isinstance(raw_list, dict):
                 raw_list = [raw_list]
 
@@ -212,17 +250,31 @@ class CardSynthesizer:
         elif isinstance(raw_list, list):
             for m in raw_list[:5]:
                 if isinstance(m, dict):
-                    corner = m.get("name") or m.get("cornerName") or m.get("restaurant") or "식당"
-                    menu_text = m.get("menu") or m.get("menuName") or ""
-                    if menu_text and menu_text != "-":
-                        items.append(
-                            ListItem(
-                                title=str(corner),
-                                subtitle=str(menu_text).replace("\n", " | "),
-                                tag=m.get("mealLabel", "식단"),
-                                link="/home/menu",
+                    if "breakfast" in m or "lunch" in m or "dinner" in m:
+                        caf = m.get("cafeteria", "식당")
+                        for m_lbl, m_field in [("조식", "breakfast"), ("중식", "lunch"), ("석식", "dinner")]:
+                            m_val = str(m.get(m_field) or "").strip()
+                            if m_val and m_val != "-":
+                                items.append(
+                                    ListItem(
+                                        title=f"{caf} {m_lbl}",
+                                        subtitle=m_val.replace("\n", " | "),
+                                        tag=m_lbl,
+                                        link="/home/menu",
+                                    )
+                                )
+                    else:
+                        corner = m.get("name") or m.get("cornerName") or m.get("restaurant") or "식당"
+                        menu_text = m.get("menu") or m.get("menuName") or ""
+                        if menu_text and menu_text != "-":
+                            items.append(
+                                ListItem(
+                                    title=str(corner),
+                                    subtitle=str(menu_text).replace("\n", " | "),
+                                    tag=m.get("mealLabel", "식단"),
+                                    link="/home/menu",
+                                )
                             )
-                        )
 
         if not items:
             return None
@@ -340,7 +392,14 @@ class CardSynthesizer:
                     return None
 
         items: List[ListItem] = []
-        notices = data if isinstance(data, list) else data.get("contents", data.get("notices", []))
+        notices = data if isinstance(data, list) else (
+            data.get("rawData")
+            or (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else [])
+            or data.get("contents")
+            or data.get("notices")
+            or data.get("items")
+            or []
+        )
 
         for n in notices[:4]:
             if isinstance(n, dict):
@@ -374,7 +433,14 @@ class CardSynthesizer:
         if not data:
             return None
         items: List[ListItem] = []
-        schedules = data if isinstance(data, list) else data.get("schedules", [])
+        schedules = data if isinstance(data, list) else (
+            data.get("rawData")
+            or (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else [])
+            or data.get("schedules")
+            or data.get("items")
+            or data.get("contents")
+            or []
+        )
 
         for s in schedules[:4]:
             if isinstance(s, dict):
@@ -484,15 +550,24 @@ class CardSynthesizer:
             return None
         items: List[ListItem] = []
         contacts = data if isinstance(data, list) else (
-            data.get("contents") or data.get("items") or data.get("contacts") or []
+            data.get("rawData")
+            or (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else [])
+            or data.get("contents")
+            or data.get("items")
+            or data.get("contacts")
+            or (data.get("data") if isinstance(data.get("data"), list) else [])
+            or []
         )
+        if isinstance(contacts, dict):
+            contacts = [contacts]
 
         for c in contacts[:4]:
             if isinstance(c, dict):
                 # College office contact vs individual directory entry
                 dept_name = c.get("departmentName") or c.get("deptName")
                 indiv_name = c.get("name")
-                name = dept_name or indiv_name or "연락처"
+                is_office = bool(dept_name and not indiv_name)
+                name = dept_name if is_office else (indiv_name or dept_name or "연락처")
 
                 phone = c.get("officePhoneNumber") or c.get("phoneNumber") or c.get("phone") or c.get("tel") or ""
                 location = c.get("officeLocation") or c.get("office") or c.get("location") or ""
@@ -500,7 +575,7 @@ class CardSynthesizer:
                 position = c.get("position")
                 detail_aff = c.get("detailAffiliation") or c.get("affiliation")
 
-                tag = (college or position or detail_aff or "연락처")[:8]
+                tag = "학과사무실" if is_office else ((position or college or detail_aff or "교내연락처")[:8])
                 sub_parts = []
                 if phone:
                     sub_parts.append(f"📞 {phone}")
@@ -534,10 +609,13 @@ class CardSynthesizer:
     def _build_weather_card(cls, data: Optional[Any] = None) -> Optional[MetricCard]:
         if not data or not isinstance(data, dict):
             return None
-        temp = data.get("temp") or data.get("temperature") or "--°C"
-        sky = data.get("sky") or data.get("condition") or "맑음"
-        pm10 = data.get("pm10") or data.get("airQuality") or "보통"
-        rain = data.get("rain") or data.get("precipitation") or "0mm"
+        w_data = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+        temp = w_data.get("temp") or w_data.get("temperature") or "--°C"
+        if temp and not str(temp).endswith("°C") and str(temp) != "--°C":
+            temp = f"{temp}°C"
+        sky = w_data.get("sky") or w_data.get("condition") or "맑음"
+        pm10 = w_data.get("pm10Grade") or w_data.get("pm10") or w_data.get("airQuality") or "보통"
+        rain = w_data.get("rain") or w_data.get("precipitation") or "0mm"
 
         return MetricCard(
             title="⛅ 송도 캠퍼스 실시간 날씨",
@@ -551,6 +629,68 @@ class CardSynthesizer:
                 MetricCardItem(label="강수량", value=str(rain)),
             ],
             footer_text="기상청 실시간 송도 캠퍼스 관측 데이터 기반",
+        )
+
+    @classmethod
+    def _build_club_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+        if not data:
+            return None
+        c_raw = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+        items_list = c_raw.get("items") or data.get("items") or (data if isinstance(data, list) else [])
+        if not items_list:
+            return None
+        items = []
+        for cl in items_list[:5]:
+            if isinstance(cl, dict):
+                c_name = cl.get("name") or "동아리"
+                c_cat = cl.get("category") or "중앙동아리"
+                c_room = cl.get("room") or ""
+                sub = f"위치: {c_room}" if c_room else "인천대학교 중앙동아리"
+                items.append(
+                    ListItem(
+                        title=str(c_name),
+                        subtitle=sub,
+                        tag=str(c_cat)[:6],
+                        link="/home/club",
+                    )
+                )
+        if not items:
+            return None
+        return ListCard(
+            title="🎯 교내 동아리 목록",
+            items=items,
+            footer_text="동아리 가입 및 상세 활동 내역은 학생회관 동아리방을 방문해 보세요.",
+        )
+
+    @classmethod
+    def _build_lost_property_card(cls, data: Optional[Any] = None) -> Optional[ListCard]:
+        if not data:
+            return None
+        lp_raw = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+        items_list = lp_raw.get("items") or data.get("items") or (data if isinstance(data, list) else [])
+        if not items_list:
+            return None
+        items = []
+        for lp in items_list[:5]:
+            if isinstance(lp, dict):
+                title = lp.get("title") or lp.get("name") or "습득물/분실물"
+                loc = lp.get("location") or lp.get("place") or ""
+                date = lp.get("date") or lp.get("createDate") or ""
+                sub = f"위치: {loc} | 날짜: {date}".strip(" |") if (loc or date) else "학내 분실물 안내"
+                items.append(
+                    ListItem(
+                        title=str(title),
+                        subtitle=sub,
+                        tag=str(lp.get("status", "보관중"))[:6],
+                        link="/home/lost-property",
+                    )
+                )
+        if not items:
+            return None
+        return ListCard(
+            title="📦 학내 분실물 및 습득물 목록",
+            items=items,
+            footer_text="분실물 수령 및 문의는 학생지원과 또는 해당 보관 장소를 방문하세요.",
         )
 
     @classmethod
@@ -583,7 +723,8 @@ class CardSynthesizer:
         # 2. 열람실 잔여 좌석 목록 컴포넌트 카드 (LIBRARY_ROOMS)
         raw_rooms = []
         if isinstance(data, dict):
-            raw_rooms = data.get("rooms") or data.get("list") or []
+            lib_raw = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+            raw_rooms = lib_raw.get("rooms") or lib_raw.get("list") or data.get("rooms") or []
         elif isinstance(data, list):
             raw_rooms = data
 
@@ -759,12 +900,18 @@ class CardSynthesizer:
         if "error" in data:
             return None
 
-        q = data.get("query") or query or ""
-        total_count = data.get("totalCount", 0)
+        data_root = data.get("rawData") if isinstance(data.get("rawData"), dict) else (data.get("uiComponent", {}).get("data") if isinstance(data.get("uiComponent"), dict) else data)
+        if isinstance(data_root, dict) and "items" in data_root and isinstance(data_root["items"], list) and data_root["items"]:
+            first_item = data_root["items"][0]
+            if isinstance(first_item, dict) and any(k in first_item for k in ["notices", "schedules", "directory", "departmentNotices"]):
+                data_root = first_item
+
+        q = data_root.get("query") or data_root.get("q") or query or ""
+        total_count = data_root.get("totalCount", 0)
         items: List[ListItem] = []
 
         # 1. Directory (교직원 / 학과 연락처)
-        dir_sec = data.get("directory")
+        dir_sec = data_root.get("directory")
         if isinstance(dir_sec, dict) and dir_sec.get("items"):
             for d in dir_sec["items"][:2]:
                 name = d.get("name") or "교직원/학과"
@@ -781,7 +928,7 @@ class CardSynthesizer:
                 )
 
         # 2. Notices (학교 공지사항)
-        notices_sec = data.get("notices")
+        notices_sec = data_root.get("notices")
         if isinstance(notices_sec, dict) and notices_sec.get("items"):
             for n in notices_sec["items"][:2]:
                 title = n.get("title") or "공지사항"
@@ -800,7 +947,7 @@ class CardSynthesizer:
                 )
 
         # 3. Department Notices (학과 공지)
-        dept_sec = data.get("departmentNotices")
+        dept_sec = data_root.get("departmentNotices")
         if isinstance(dept_sec, dict) and dept_sec.get("items"):
             for dn in dept_sec["items"][:2]:
                 title = dn.get("title") or "학과공지"
@@ -817,7 +964,7 @@ class CardSynthesizer:
                 )
 
         # 4. Schedules (학사일정)
-        sched_sec = data.get("schedules")
+        sched_sec = data_root.get("schedules")
         if isinstance(sched_sec, dict) and sched_sec.get("items"):
             for s in sched_sec["items"][:2]:
                 content = s.get("content") or "학사일정"
@@ -834,7 +981,7 @@ class CardSynthesizer:
                 )
 
         # 5. Courses (개설 강의)
-        course_sec = data.get("courses")
+        course_sec = data_root.get("courses")
         if isinstance(course_sec, dict) and course_sec.get("items"):
             for c in course_sec["items"][:2]:
                 c_name = c.get("courseName") or "강의"
@@ -851,7 +998,7 @@ class CardSynthesizer:
                 )
 
         # 6. Clubs (동아리)
-        club_sec = data.get("clubs")
+        club_sec = data_root.get("clubs")
         if isinstance(club_sec, dict) and club_sec.get("items"):
             for cl in club_sec["items"][:2]:
                 name = cl.get("name") or "동아리"
@@ -866,7 +1013,7 @@ class CardSynthesizer:
                 )
 
         # 7. Posts (커뮤니티)
-        post_sec = data.get("posts")
+        post_sec = data_root.get("posts")
         if isinstance(post_sec, dict) and post_sec.get("items"):
             for p in post_sec["items"][:2]:
                 title = p.get("title") or "게시글"

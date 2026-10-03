@@ -52,6 +52,7 @@ logs/
 .coverage
 htmlcov/
 .pytest_cache/
+scratch/
 
 # OS
 .DS_Store

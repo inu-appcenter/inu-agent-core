@@ -58,7 +58,10 @@ class DynamicBusMatcher:
 
         # 1. Match from live server route sections first (actual boarding/origin stops like 공대/자연대, 인입런, 지정단런)
         best_score = 0.0
+        from app.tools.coercer import CAMPUS_SYNONYMS
+
         if sections:
+            # Pass 1-A: Exact alias/name matching with synonyms (prioritize actual stop over tab name)
             for sec in sections:
                 if not isinstance(sec, dict):
                     continue
@@ -67,23 +70,59 @@ class DynamicBusMatcher:
                 s_id = sec.get("startBstopId")
                 tab_name = sec.get("tabName") or ""
 
-                for cand in [s_alias, s_name, tab_name]:
+                for cand in [s_alias, s_name]:
                     if not cand:
                         continue
-                    if cand.lower() in target_text.lower() or target_text.lower() in cand.lower():
+                    cand_tokens = [cand.lower()] + [p.strip().lower() for p in cand.replace("/", " ").split() if p.strip()]
+                    for tok in list(cand_tokens):
+                        for canonical, syns in CAMPUS_SYNONYMS.items():
+                            if tok == canonical.lower() or tok in [s.lower() for s in syns]:
+                                cand_tokens.extend([s.lower() for s in syns])
+                                cand_tokens.append(canonical.lower())
+
+                    if any(t in target_text.lower() for t in cand_tokens):
                         matched_bstop_id = s_id
-                        resolved_stop_name = s_alias or s_name
+                        resolved_stop_name = f"{s_name}({s_alias})" if s_name and s_alias and s_alias not in s_name else (s_name or s_alias)
                         matched_tab_name = tab_name
                         best_score = 1.0
                         break
-                    ratio = difflib.SequenceMatcher(None, target_text.lower(), cand.lower()).ratio()
-                    if ratio > best_score and ratio > 0.4:
-                        best_score = ratio
-                        matched_bstop_id = s_id
-                        resolved_stop_name = s_alias or s_name
-                        matched_tab_name = tab_name
                 if best_score == 1.0:
                     break
+
+            # Pass 1-B: Fallback to tabName and fuzzy matching if exact stop alias/name not matched
+            if not matched_bstop_id:
+                for sec in sections:
+                    if not isinstance(sec, dict):
+                        continue
+                    s_name = sec.get("startBstopName") or ""
+                    s_alias = sec.get("startBstopAlias") or ""
+                    s_id = sec.get("startBstopId")
+                    tab_name = sec.get("tabName") or ""
+
+                    for cand in [s_alias, s_name, tab_name]:
+                        if not cand:
+                            continue
+                        cand_tokens = [cand.lower()] + [p.strip().lower() for p in cand.replace("/", " ").split() if p.strip()]
+                        for tok in list(cand_tokens):
+                            for canonical, syns in CAMPUS_SYNONYMS.items():
+                                if tok == canonical.lower() or tok in [s.lower() for s in syns]:
+                                    cand_tokens.extend([s.lower() for s in syns])
+                                    cand_tokens.append(canonical.lower())
+
+                        if any(t in target_text.lower() for t in cand_tokens):
+                            matched_bstop_id = s_id
+                            resolved_stop_name = f"{s_name}({s_alias})" if s_name and s_alias and s_alias not in s_name else (s_name or s_alias)
+                            matched_tab_name = tab_name
+                            best_score = 1.0
+                            break
+                        ratio = difflib.SequenceMatcher(None, target_text.lower(), cand.lower()).ratio()
+                        if ratio > best_score and ratio > 0.4:
+                            best_score = ratio
+                            matched_bstop_id = s_id
+                            resolved_stop_name = f"{s_name}({s_alias})" if s_name and s_alias and s_alias not in s_name else (s_name or s_alias)
+                            matched_tab_name = tab_name
+                    if best_score == 1.0:
+                        break
 
         # 2. Match from live server stop aliases if not matched with high confidence from route sections
         if not matched_bstop_id or best_score < 0.8:
@@ -103,16 +142,23 @@ class DynamicBusMatcher:
                 for cand in candidates:
                     if not cand:
                         continue
-                    if cand.lower() in target_text.lower() or target_text.lower() in cand.lower():
+                    cand_tokens = [cand.lower()] + [p.strip().lower() for p in cand.replace("/", " ").replace(",", " ").split() if p.strip()]
+                    for tok in list(cand_tokens):
+                        for canonical, syns in CAMPUS_SYNONYMS.items():
+                            if tok == canonical.lower() or tok in [s.lower() for s in syns]:
+                                cand_tokens.extend([s.lower() for s in syns])
+                                cand_tokens.append(canonical.lower())
+
+                    if any(t in target_text.lower() for t in cand_tokens):
                         matched_bstop_id = bstop_id
-                        resolved_stop_name = stop_alias or bstop_name
+                        resolved_stop_name = f"{bstop_name}({stop_alias})" if bstop_name and stop_alias and stop_alias not in bstop_name else (bstop_name or stop_alias)
                         best_score = 1.0
                         break
                     ratio = difflib.SequenceMatcher(None, target_text.lower(), cand.lower()).ratio()
                     if ratio > best_score and ratio > 0.4:
                         best_score = ratio
                         matched_bstop_id = bstop_id
-                        resolved_stop_name = stop_alias or bstop_name
+                        resolved_stop_name = f"{bstop_name}({stop_alias})" if bstop_name and stop_alias and stop_alias not in bstop_name else (bstop_name or stop_alias)
                 if best_score == 1.0:
                     break
 
@@ -120,7 +166,9 @@ class DynamicBusMatcher:
         if not matched_bstop_id and sections:
             first_sec = sections[0]
             matched_bstop_id = first_sec.get("startBstopId")
-            resolved_stop_name = first_sec.get("startBstopAlias") or first_sec.get("startBstopName") or "인천대입구역 2번출구"
+            first_alias = first_sec.get("startBstopAlias") or ""
+            first_name = first_sec.get("startBstopName") or ""
+            resolved_stop_name = f"{first_name}({first_alias})" if first_name and first_alias and first_alias not in first_name else (first_name or first_alias or "인천대입구역 2번출구")
             matched_tab_name = first_sec.get("tabName") or "인입런"
 
         # 4. Extract valid serviced route numbers for this stop
@@ -131,7 +179,14 @@ class DynamicBusMatcher:
             ]
             if matched_sec_list:
                 matched_tab_name = matched_sec_list[0].get("tabName") or matched_tab_name
-                resolved_stop_name = matched_sec_list[0].get("startBstopAlias") or matched_sec_list[0].get("startBstopName") or resolved_stop_name
+                sec_alias = matched_sec_list[0].get("startBstopAlias") or ""
+                sec_name = matched_sec_list[0].get("startBstopName") or ""
+                if sec_name and sec_alias and sec_alias not in sec_name:
+                    resolved_stop_name = f"{sec_name}({sec_alias})"
+                elif sec_name:
+                    resolved_stop_name = sec_name
+                elif sec_alias:
+                    resolved_stop_name = sec_alias
                 for s in matched_sec_list:
                     r_no = s.get("routeNo")
                     if r_no and r_no not in valid_routes:
@@ -218,6 +273,43 @@ class AgentRouter:
         if not query:
             return ""
         cleaned = query.strip()
+        cleaned = re.sub(r"[?!.,~]+$", "", cleaned).strip()
+
+        # Remove conversational ending phrases (e.g. 관련해서 전체 검색 좀 해줘, 알려줘, 뭐야)
+        filler_pattern = re.compile(
+            r"(?:관련해서\s*전체\s*검색\s*(?:좀\s*)?(?:해줘|해\s*주세요|부탁해)?|"
+            r"관련\s*전체\s*검색\s*(?:좀\s*)?(?:해줘|해\s*주세요|부탁해)?|"
+            r"전체\s*검색\s*(?:좀\s*)?(?:해줘|해\s*주세요|부탁해)?|"
+            r"관련해서\s*(?:검색|조회|확인|찾아|알려)\s*(?:해줘|해\s*주세요|줘)?|"
+            r"관련된\s*(?:정보\s*)?(?:검색|조회|확인|찾아|알려)\s*(?:해줘|해\s*주세요|줘)?|"
+            r"관련\s*(?:정보\s*)?(?:검색|조회|확인|찾아|알려)\s*(?:해줘|해\s*주세요|줘)?|"
+            r"에\s*대해(?:서)?\s*(?:알려줘|찾아줘|알려주세요|검색해줘)?|"
+            r"(?:좀\s*)?(?:알려줘|알려주세요|찾아줘|찾아주세요|검색해줘|검색해\s*주세요|조회해줘|조회해\s*주세요|확인해줘|확인해\s*주세요|보여줘|보여주세요)|"
+            r"(?:알고\s*싶어|알고\s*싶어요|알고\s*싶습니다)|"
+            r"(?:뭐야|어디야|어떻게\s*돼|어떻게\s*되나요|어디에\s*있어|어디에\s*있나요))$"
+        )
+        cleaned = filler_pattern.sub("", cleaned).strip()
+
+        # Remove academic terms and catalog query noise from search fallback (e.g. 2026년 2학기 데이터사이언스 개설강의 목록 -> 데이터사이언스)
+        academic_noise = re.compile(
+            r"^(?:\d{4}년도?|\d{4}년|\d{4}|\b(?:이번|저번|다음)\s*학기|\b[12]학기)\s*"
+        )
+        cleaned = academic_noise.sub("", cleaned).strip()
+        academic_noise_term = re.compile(
+            r"^(?:[12]학기|여름계절학기|겨울계절학기|계절학기)\s*"
+        )
+        cleaned = academic_noise_term.sub("", cleaned).strip()
+
+        course_suffix = re.compile(
+            r"(?:\s*(?:강의계획서\s*(?:평가\s*비율|주차별\s*계획|평가비율|주차별계획|내용)?|"
+            r"평가\s*비율이나\s*주차별\s*계획|"
+            r"평가\s*비율|주차별\s*계획|평가비율|주차별계획|"
+            r"개설강의|개설\s*강의|개설과목|개설\s*과목|수강편람|강의목록|강의\s*목록|수업목록|수업\s*목록|강의계획서|실라버스|수업계획|목록|리스트))+$"
+        )
+        temp_cleaned = course_suffix.sub("", cleaned).strip()
+        if len(temp_cleaned) >= 2:
+            cleaned = temp_cleaned
+
         pattern = re.compile(r"(?:교수님|교수|선생님|조교님|학부장님|학과장님|과사|연구실|사무실|연락처|전화번호|이메일|메일|번호)$")
         changed = True
         while changed and len(cleaned) >= 2:
@@ -226,7 +318,7 @@ class AgentRouter:
                 cleaned = cleaned[:m.start()].strip()
             else:
                 changed = False
-        return cleaned
+        return cleaned or query.strip()
 
     @classmethod
     async def decide_initial_plan(
@@ -244,7 +336,11 @@ class AgentRouter:
         history_str = cls._format_history_str(history, max_turns=6)
 
         # Ensure core campus domain tools are always visible in candidate catalog
-        core_categories = {"PORTAL", "LIBRARY", "LMS", "BUS", "CAFETERIA", "TIMETABLE", "SCHEDULE", "NOTICE", "DIRECTORY", "WEATHER", "CAMPUS_WATCH", "INU_AI_KNOWLEDGE"}
+        core_categories = {
+            "PORTAL", "LIBRARY", "LMS", "BUS", "CAFETERIA", "TIMETABLE",
+            "SCHEDULE", "NOTICE", "DIRECTORY", "WEATHER", "CAMPUS_WATCH",
+            "INU_AI_KNOWLEDGE", "SEARCH", "CLUB", "LOST_PROPERTY"
+        }
         all_candidate_tools = list(candidate_tools)
         existing_cats = {t.category.upper() for t in all_candidate_tools}
         

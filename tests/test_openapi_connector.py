@@ -175,3 +175,36 @@ def test_unified_search_parsing_and_card_synthesis():
     notice_item = next(it for it in card.items if it.tag == "학교공지")
     assert notice_item.link == "/home/notice/1"
 
+
+def test_openapi_tool_auth_relay_with_access_token():
+    async def _test():
+        tool = OpenApiTool(
+            name="api_getCourseOfferings",
+            description="강의 조회 API",
+            method="GET",
+            path="/api/course-offerings",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+
+        mock_response = httpx.Response(
+            status_code=200,
+            json={"data": [{"id": 1, "title": "파이썬 프로그래밍"}]},
+            request=httpx.Request("GET", "http://localhost:8080/api/course-offerings"),
+        )
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_response
+            
+            # Execute with accessToken in context
+            context = {"accessToken": "mock-jwt-token-123"}
+            res = await tool.execute(arguments={}, context=context)
+            assert res == [{"id": 1, "title": "파이썬 프로그래밍"}]
+
+            call_kwargs = mock_get.call_args.kwargs
+            headers = call_kwargs.get("headers", {})
+            assert headers.get("Auth") == "mock-jwt-token-123"
+            assert headers.get("Authorization") == "Bearer mock-jwt-token-123"
+
+    asyncio.run(_test())
+
+

@@ -246,6 +246,59 @@
           }
         }
       }
+    },
+    "/api/course-offerings": {
+      "get": {
+        "tags": ["CourseOfferings"],
+        "summary": "개설 강의 목록 조회",
+        "description": "연도(year), 학기(term: FIRST, SECOND, SUMMER, WINTER), 검색어(keyword), 학과명(deptName) 등으로 이번 학기 또는 특정 학기의 개설 강의 목록을 조회합니다.",
+        "operationId": "getCourseOfferings",
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "description": "개설 연도 (예: 2026)",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "term",
+            "in": "query",
+            "description": "학기 구분 (FIRST: 1학기, SECOND: 2학기, SUMMER: 여름학기, WINTER: 겨울학기)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["FIRST", "SECOND", "SUMMER", "WINTER"]
+            }
+          },
+          {
+            "name": "keyword",
+            "in": "query",
+            "description": "교과목명 또는 교수명 검색 키워드 (예: 파이썬, 인공지능, 자료구조)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "deptName",
+            "in": "query",
+            "description": "개설 학과명 (예: 컴퓨터공학부, 정보통신공학과)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "조회 성공"
+          }
+        }
+      }
     }
   }
 }
+

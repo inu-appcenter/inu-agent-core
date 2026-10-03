@@ -21,6 +21,7 @@ from app.tools.notification_tools import (
     NoticeKeywordTool,
     MySettingsTool,
 )
+from app.tools.mcp_connector import McpConnector, McpRemoteTool
 
 class ToolRegistry:
     def __init__(self):
@@ -35,9 +36,80 @@ class ToolRegistry:
             return self._tools[name]
         # Case-insensitive and prefix-tolerant alias matching
         clean_name = name.replace("api_", "").replace("action_", "").replace("-", "_").lower()
+        # 1. Exact match on stripped tool name
         for t_name, t in self._tools.items():
             t_clean = t_name.replace("api_", "").replace("action_", "").replace("-", "_").lower()
             if t_clean == clean_name:
+                return t
+
+        # 2. Canonical domain alias mappings (prioritize primary search/query tools)
+        if "contact" in clean_name or "directory" in clean_name:
+            for preferred in ["api_searchDirectory", "api_getDirectory", "searchDirectory", "getDirectory", "directory"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "directory" in t_name.lower():
+                    return t
+        elif "search" in clean_name:
+            for preferred in ["api_unifiedSearch", "api_search", "unifiedSearch", "search"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "search" in t_name.lower():
+                    return t
+        elif "club" in clean_name:
+            for preferred in ["api_getAllClubs", "getAllClubs", "api_getClubs", "api_club", "getClubs"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "club" in t_name.lower():
+                    return t
+        elif "lost" in clean_name:
+            for preferred in ["api_getLostProperties", "api_getList_1", "getLostProperties", "api_lostProperty"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "lost" in t_name.lower():
+                    return t
+        elif "syllabus" in clean_name:
+            for preferred in ["api_getSyllabus", "getSyllabus"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "syllabus" in t_name.lower():
+                    return t
+        elif "tuition" in clean_name:
+            for preferred in ["action_portal_get_tuition", "PORTAL_GET_TUITION"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "scholarship" in clean_name:
+            for preferred in ["action_portal_get_scholarship", "PORTAL_GET_SCHOLARSHIP"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "assignment" in clean_name:
+            for preferred in ["action_lms_get_upcoming_assignments", "LMS_GET_UPCOMING_ASSIGNMENTS"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "reminder" in clean_name:
+            for preferred in ["action_manage_reminder", "manage_reminder"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "setting" in clean_name:
+            for preferred in ["action_my_settings", "my_settings", "action_daily_brief"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "council" in clean_name:
+            for preferred in ["api_getCouncilNotices", "api_getAllPost_3", "api_getCouncilNotice_1"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "department" in clean_name and "notice" in clean_name:
+            for preferred in ["api_getDepartmentNotices", "getDepartmentNotices"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+
+        # 3. Fallback to category match only if no name matched
+        for t_name, t in self._tools.items():
+            if t.category.lower() == clean_name:
                 return t
         return None
 
@@ -67,9 +139,22 @@ class ToolRegistry:
 
     async def sync_inu_portal_tools(self) -> int:
         """
-        Synchronize tools from inu-portal-server /v3/api-docs.
-        If the server is unavailable, load fallback sample schema.
+        Synchronize tools from inu-portal-server.
+        Tries remote MCP (Model Context Protocol /mcp) first, and falls back to OpenAPI /v3/api-docs if unreachable.
         """
+        # 1. Try modern MCP Server first
+        try:
+            mcp_connector = McpConnector()
+            mcp_tools = await mcp_connector.fetch_tools()
+            if mcp_tools:
+                for tool in mcp_tools:
+                    self.register(tool)
+                logger.info(f"Successfully mounted {len(mcp_tools)} tools from INU Portal MCP server")
+                return len(mcp_tools)
+        except Exception as e:
+            logger.warning(f"Failed to sync tools via MCP: {e}. Falling back to OpenAPI...")
+
+        # 2. Fallback to OpenAPI Connector
         connector = OpenApiConnector()
         spec = await connector.fetch_spec()
 

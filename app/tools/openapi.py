@@ -50,10 +50,14 @@ class OpenApiTool(BaseTool):
         base_url = settings.INU_PORTAL_SERVER_URL.rstrip("/")
         url_path = self.path
 
-        # 1. Path parameter substitution (e.g. /api/timetables/{timeTableId})
+        # 1. Parameter schema coercion
+        from app.tools.coercer import SchemaCoercer
+        coerced_arguments = SchemaCoercer.coerce(self.parameters_schema, arguments)
+
+        # 2. Path parameter substitution (e.g. /api/timetables/{timeTableId})
         path_vars = re.findall(r"\{([a-zA-Z0-9_]+)\}", self.path)
         query_params = {}
-        for k, v in arguments.items():
+        for k, v in coerced_arguments.items():
             if k in path_vars:
                 url_path = url_path.replace(f"{{{k}}}", str(v))
             else:
@@ -67,11 +71,19 @@ class OpenApiTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        raw_token = (
+            context.get("auth")
+            or context.get("authorization")
+            or context.get("accessToken")
+            or context.get("access_token")
+            or context.get("token")
+            or ""
+        )
+        clean_token = str(raw_token).replace("Bearer ", "").strip() if raw_token else ""
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
+
 
         if settings.INU_INTERNAL_S2S_SECRET:
             headers["X-Internal-Secret"] = settings.INU_INTERNAL_S2S_SECRET
@@ -99,12 +111,14 @@ class OpenApiTool(BaseTool):
                 if isinstance(data, dict) and "data" in data:
                     data = data["data"]
 
-                # Extract list if inside ListResponseDto (e.g. {"pages": 1, "total": 2, "contents": [...]})
+                # Extract list if inside ListResponseDto or Spring Page (e.g. {"content": [...]} or {"items": [...]})
                 list_payload = None
                 if isinstance(data, list):
                     list_payload = data
                 elif isinstance(data, dict):
-                    if "contents" in data and isinstance(data["contents"], list):
+                    if "content" in data and isinstance(data["content"], list):
+                        list_payload = data["content"]
+                    elif "contents" in data and isinstance(data["contents"], list):
                         list_payload = data["contents"]
                     elif "items" in data and isinstance(data["items"], list):
                         list_payload = data["items"]
@@ -115,11 +129,17 @@ class OpenApiTool(BaseTool):
                         return {
                             "total_count": len(list_payload),
                             "items": list_payload[:6],
+                            "content": list_payload[:6],
                             "contents": list_payload[:6],
                             "notice": f"결과가 많아 상위 6개 항목만 표시합니다. (전체 {len(list_payload)}건)",
                         }
-                    elif isinstance(data, dict) and "contents" in data:
-                        data["items"] = list_payload
+                    elif isinstance(data, dict):
+                        if "content" in data:
+                            data["content"] = list_payload
+                            data["items"] = list_payload
+                        elif "contents" in data:
+                            data["contents"] = list_payload
+                            data["items"] = list_payload
 
                 # Guardrail for Unified Search: truncate each section's items to top 3 to prevent token exhaustion
                 if isinstance(data, dict) and any(k in data for k in ["notices", "departmentNotices", "directory", "schedules", "courses", "clubs", "posts"]):
@@ -165,6 +185,7 @@ class OpenApiConnector:
         """Convert OpenAPI 3.0 paths into OpenApiTool objects"""
         tools: List[OpenApiTool] = []
         paths = spec.get("paths", {})
+        root_security = spec.get("security", [])
 
         for path, path_item in paths.items():
             for method, op in path_item.items():
@@ -179,17 +200,59 @@ class OpenApiConnector:
                 tags = op.get("tags", [])
                 category = self._infer_category(path, tags)
 
-                # Skip internal or deprecated APIs
-                if any(x in path for x in ["/admin/", "/actuator/", "/error", "/agent/"]):
+                # Skip internal, deprecated, or non-functional legacy APIs
+                # Note: /api/search is a legacy broken endpoint (500 Internal Server Error).
+                # All search operations are officially served by /api/search/unified (unifiedSearch).
+                if any(x in path for x in ["/admin/", "/actuator/", "/error", "/agent/"]) or path == "/api/search":
                     continue
 
-                tool_name = self._sanitize_tool_name(op_id, path)
-                params_schema = self._build_params_schema(op.get("parameters", []))
-                requires_auth = self._check_auth_required(op)
+                # Canonical naming and clean descriptions for high-traffic student life domains
+                clean_summary = summary
+                if "\ufffd" in summary or not summary.strip():
+                    if path == "/api/lost":
+                        tool_name = "api_getLostProperties"
+                        clean_summary = "학내 분실물 습득/신고 목록 조회"
+                    elif path == "/api/lost/{lostId}":
+                        tool_name = "api_getLostPropertyDetail"
+                        clean_summary = "학내 분실물 상세 정보 조회"
+                    elif path == "/api/clubs":
+                        tool_name = "api_getAllClubs"
+                        clean_summary = "교내 동아리 목록 및 분과별 동아리 정보 조회"
+                    elif path == "/api/clubs/{clubId}":
+                        tool_name = "api_getClubDetail"
+                        clean_summary = "동아리 상세 정보 및 모집 요강 조회"
+                    elif path == "/api/councilNotices":
+                        tool_name = "api_getCouncilNotices"
+                        clean_summary = "총학생회 공식 공지사항 목록 조회"
+                    elif path == "/api/councilNotices/{councilNoticeId}":
+                        tool_name = "api_getCouncilNoticeDetail"
+                        clean_summary = "총학생회 공지사항 상세 내용 조회"
+                    elif path == "/api/notices/department":
+                        tool_name = "api_getDepartmentNotices"
+                        clean_summary = "단과대/학과별 공식 공지사항 목록 조회"
+                    elif path == "/api/syllabus":
+                        tool_name = "api_getSyllabus"
+                        clean_summary = "교과목 강의계획서 (수업 개요, 주차별 계획, 평가 비율) 조회"
+                    elif path == "/api/course-offerings":
+                        tool_name = "api_getCourseOfferings"
+                        clean_summary = "학기별/학과별 개설 강의 목록 및 수업 정보 조회"
+                    elif path == "/api/grades/all":
+                        tool_name = "api_getAllGradeRecord"
+                        clean_summary = "학생 본인의 전체 학기 취득 성적 및 평점 조회"
+                    elif path == "/api/grades":
+                        tool_name = "api_getGradeRecord"
+                        clean_summary = "특정 학기 성적 상세 조회"
+                    else:
+                        tool_name = self._sanitize_tool_name(op_id, path)
+                else:
+                    tool_name = self._sanitize_tool_name(op_id, path)
+
+                params_schema = self._build_params_schema(op.get("parameters", []), path=path)
+                requires_auth = self._check_auth_required(op, root_security=root_security)
 
                 tool = OpenApiTool(
                     name=tool_name,
-                    description=summary,
+                    description=clean_summary,
                     method=method,
                     path=path,
                     parameters_schema=params_schema,
@@ -215,33 +278,57 @@ class OpenApiConnector:
 
     def _infer_category(self, path: str, tags: List[str]) -> str:
         p = path.lower()
-        if "/search" in p:
-            return "SEARCH"
-        if "/cafeteria" in p:
-            return "CAFETERIA"
-        if "/bus" in p or "buses" in p or "shuttle" in p:
-            return "BUS"
-        if "/timetable" in p or "syllabus" in p:
-            return "TIMETABLE"
-        if "/notice" in p or "councilnotice" in p:
-            return "NOTICE"
-        if "/schedule" in p or "/calendar" in p or "/semester" in p:
-            return "SCHEDULE"
-        if "/reservation" in p:
-            return "RESERVATION"
-        if "/weather" in p:
-            return "WEATHER"
-        if "/directory" in p or "contact" in p or "/department" in p:
+        tags_lower = [t.lower() for t in tags]
+
+        # Prioritize keyword/fcm/alarm notification endpoints first
+        if "/keyword" in p or "/fcm" in p or "/alarm" in p or "/notification" in p:
+            return "KEYWORD"
+
+        # Prioritize specific subdomains first
+        if "/directory" in p or "contact" in p or any("directory" in t for t in tags_lower):
             return "DIRECTORY"
+        if "/cafeteria" in p or any("cafeteria" in t for t in tags_lower):
+            return "CAFETERIA"
+        if "/bus" in p or "buses" in p or "shuttle" in p or any(t in ["bus", "buses", "shuttle"] for t in tags_lower):
+            return "BUS"
+        if "/timetable" in p or any("timetable" in t for t in tags_lower):
+            return "TIMETABLE"
+        if "/syllabus" in p or any("syllabus" in t for t in tags_lower):
+            return "COURSE"
+        if "/notice" in p or "councilnotice" in p or any("notice" in t for t in tags_lower):
+            return "NOTICE"
+        if "/schedule" in p or "/calendar" in p or "/semester" in p or any("schedule" in t for t in tags_lower):
+            return "SCHEDULE"
+        if "/reservation" in p or any("reservation" in t for t in tags_lower):
+            return "RESERVATION"
+        if "/weather" in p or any("weather" in t for t in tags_lower):
+            return "WEATHER"
+        if "/grade" in p or any("grade" in t for t in tags_lower):
+            return "PORTAL"
+        if "/course" in p or any("course" in t for t in tags_lower):
+            return "COURSE"
+        if "/club" in p or any("club" in t for t in tags_lower):
+            return "CLUB"
+        if "/lost" in p or any("lost" in t for t in tags_lower):
+            return "LOST_PROPERTY"
+        if "/search" in p or any("search" in t for t in tags_lower):
+            return "SEARCH"
         return "INTIP"
 
-    def _check_auth_required(self, op: Dict[str, Any]) -> bool:
-        security = op.get("security", [])
-        return len(security) > 0
 
-    def _build_params_schema(self, parameters: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _check_auth_required(self, op: Dict[str, Any], root_security: Optional[List[Dict[str, Any]]] = None) -> bool:
+        op_security = op.get("security")
+        if op_security is not None:
+            return len(op_security) > 0
+        if root_security:
+            return len(root_security) > 0
+        return False
+
+    def _build_params_schema(self, parameters: List[Dict[str, Any]], path: str = "") -> Dict[str, Any]:
         properties = {}
         required = []
+
+        is_course_offerings = path == "/api/course-offerings"
 
         for p in parameters:
             p_name = p.get("name")
@@ -252,17 +339,58 @@ class OpenApiConnector:
             p_type = p_schema.get("type", "string")
             p_desc = p.get("description") or f"Parameter {p_name}"
 
+            # Canonical parameter schema overrides for course-offerings to eliminate OpenAPI encoding corruption
+            if is_course_offerings:
+                if p_name == "deptName":
+                    properties["deptName"] = {
+                        "type": "string",
+                        "description": "개설 학과명 (예: 컴퓨터공학부, 데이터과학과, 경영학부, 전자공학과 등). [주의] 학과별 개설강의 검색 시 필수 입력",
+                    }
+                    continue
+                elif p_name == "hyNames":
+                    properties["hyNames"] = {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "대상 학년 목록 (예: ['1'], ['2'], ['3'], ['4'])",
+                    }
+                    continue
+                elif p_name == "keyword":
+                    properties["keyword"] = {
+                        "type": "string",
+                        "description": "교과목명 또는 교수명 검색어 ([주의] 학과명은 keyword가 아닌 deptName에 넣어야 합니다)",
+                    }
+                    continue
+                elif p_name == "year":
+                    properties["year"] = {
+                        "type": "integer",
+                        "description": "개설 연도 (예: 2026)",
+                    }
+                    required.append("year")
+                    continue
+                elif p_name == "term":
+                    properties["term"] = {
+                        "type": "string",
+                        "enum": ["FIRST", "SECOND", "SUMMER", "WINTER"],
+                        "description": "개설 학기 (FIRST: 1학기, SECOND: 2학기, SUMMER: 여름계절학기, WINTER: 겨울계절학기)",
+                    }
+                    required.append("term")
+                    continue
+
             prop_def: Dict[str, Any] = {
                 "type": p_type,
-                "description": p_desc,
+                "description": p_desc.replace("\ufffd", "").strip(),
             }
             if "enum" in p_schema:
-                prop_def["enum"] = p_schema["enum"]
+                clean_enum = [e for e in p_schema["enum"] if "\ufffd" not in str(e)]
+                if clean_enum:
+                    prop_def["enum"] = clean_enum
+                    if not any(kw in p_desc for kw in ["허용 값", "Enum", "중 하나", "옵션"]):
+                        prop_def["description"] = f"{prop_def['description']} (허용 값: {', '.join(map(str, clean_enum[:10]))})".strip()
             if "default" in p_schema:
                 prop_def["default"] = p_schema["default"]
 
             properties[p_name] = prop_def
-            if p.get("required"):
+            if p.get("required") and p_name not in required:
                 required.append(p_name)
 
         return {

@@ -17,7 +17,22 @@ from app.tools.base import BaseTool
 logger = logging.getLogger("inu-agent-core.tools.notification")
 
 
+def _extract_clean_token(context: Optional[Dict[str, Any]]) -> str:
+    if not context:
+        return ""
+    raw = (
+        context.get("auth")
+        or context.get("authorization")
+        or context.get("accessToken")
+        or context.get("access_token")
+        or context.get("token")
+        or ""
+    )
+    return str(raw).replace("Bearer ", "").strip() if raw else ""
+
+
 class ManageReminderTool(BaseTool):
+
     """
     맞춤 푸시 알림 예약 및 관리 도구 (ACTION_MANAGE_REMINDER)
     """
@@ -82,8 +97,8 @@ class ManageReminderTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        clean_token = _extract_clean_token(context)
+
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
@@ -92,6 +107,20 @@ class ManageReminderTool(BaseTool):
             try:
                 if action == "LIST":
                     res = await client.get(f"{base_url}/api/agent/reminders", headers=headers)
+                elif action == "CREATE":
+                    target_time = str(arguments.get("targetTime") or "08:30").strip()
+                    target_tool = str(arguments.get("targetTool") or "CAFETERIA").upper()
+                    title = arguments.get("title") or f"{target_tool} 알림"
+                    repeat_type = str(arguments.get("repeatType") or "WEEKDAYS").upper()
+                    payload = {
+                        "title": title,
+                        "targetTime": target_time,
+                        "repeatType": repeat_type,
+                        "targetTool": target_tool,
+                        "toolParamsJson": json.dumps(arguments.get("toolParams", {}), ensure_ascii=False) if isinstance(arguments.get("toolParams"), dict) else "{}",
+                        "route": "/mypage/notification/daily-brief?tab=agent",
+                    }
+                    res = await client.post(f"{base_url}/api/agent/reminders", json=payload, headers=headers)
                 elif action == "DELETE":
                     rem_id = arguments.get("reminderId")
                     if not rem_id:
@@ -172,8 +201,8 @@ class DailyBriefTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        clean_token = _extract_clean_token(context)
+
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
@@ -181,13 +210,33 @@ class DailyBriefTool(BaseTool):
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 if action == "UPDATE":
-                    payload = {}
-                    if "time" in arguments:
-                        payload["time"] = arguments["time"]
-                    if "enabled" in arguments:
-                        payload["enabled"] = arguments["enabled"]
-                    if "scope" in arguments:
-                        payload["scope"] = arguments["scope"]
+                    curr_settings = {}
+                    try:
+                        get_resp = await client.get(f"{base_url}/api/daily-brief/settings", headers=headers)
+                        if get_resp.status_code == 200:
+                            curr_data = get_resp.json()
+                            curr_settings = curr_data.get("data", {}) if isinstance(curr_data, dict) else {}
+                    except Exception:
+                        pass
+
+                    target_time = str(arguments.get("time") or arguments.get("targetTime") or curr_settings.get("timetableDailyBriefTime") or "08:30").strip()
+                    enabled = arguments.get("enabled", True)
+                    if isinstance(enabled, str):
+                        enabled = enabled.lower() in ["true", "1", "yes", "on"]
+                    scope = str(arguments.get("scope") or curr_settings.get("scheduleScope") or "ALL").upper()
+                    if scope not in ["ALL", "SCHOOL_ONLY", "DEPT_ONLY"]:
+                        scope = "ALL"
+
+                    payload = {
+                        "timetableAlertEnabled": curr_settings.get("timetableAlertEnabled", True),
+                        "timetablePreAlertEnabled": curr_settings.get("timetablePreAlertEnabled", True),
+                        "timetablePreAlertMinutes": curr_settings.get("timetablePreAlertMinutes", 10),
+                        "timetableDailyBriefEnabled": enabled,
+                        "timetableDailyBriefTime": target_time,
+                        "scheduleAlertEnabled": enabled,
+                        "scheduleDailyBriefTime": target_time,
+                        "scheduleScope": scope,
+                    }
                     res = await client.put(f"{base_url}/api/daily-brief/settings", json=payload, headers=headers)
                 else:
                     res = await client.get(f"{base_url}/api/daily-brief/settings", headers=headers)
@@ -257,8 +306,8 @@ class NoticeKeywordTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        clean_token = _extract_clean_token(context)
+
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
@@ -321,8 +370,7 @@ class MySettingsTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        clean_token = _extract_clean_token(context)
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
