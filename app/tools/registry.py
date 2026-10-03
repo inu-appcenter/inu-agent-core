@@ -106,8 +106,15 @@ class ToolRegistry:
             for preferred in ["api_getDepartmentNotices", "getDepartmentNotices"]:
                 if preferred in self._tools:
                     return self._tools[preferred]
+        elif "syllabus" in clean_name:
+            for preferred in ["api_syllabus", "api_getSyllabus", "syllabus"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "syllabus" in t_name.lower():
+                    return t
         elif "course" in clean_name:
-            for preferred in ["api_getCourseOfferings", "api_course_offerings", "api_courses", "course_offerings", "getCourseOfferings"]:
+            for preferred in ["api_course_offerings", "api_getCourseOfferings", "course_offerings", "api_courses", "getCourseOfferings"]:
                 if preferred in self._tools:
                     return self._tools[preferred]
             for t_name, t in self._tools.items():

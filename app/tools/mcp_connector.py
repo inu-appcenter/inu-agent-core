@@ -41,10 +41,11 @@ class McpRemoteTool(BaseTool):
             },
         }
 
-    async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, arguments: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Any:
         """
         Execute tool call against remote MCP Server using JSON-RPC 2.0.
         """
+        context = context or {}
         # Dynamically coerce arguments against schema
         sanitized_arguments = SchemaCoercer.coerce(self.input_schema, arguments)
 
