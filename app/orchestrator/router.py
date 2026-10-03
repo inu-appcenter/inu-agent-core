@@ -290,6 +290,26 @@ class AgentRouter:
         )
         cleaned = filler_pattern.sub("", cleaned).strip()
 
+        # Remove academic terms and catalog query noise from search fallback (e.g. 2026년 2학기 데이터사이언스 개설강의 목록 -> 데이터사이언스)
+        academic_noise = re.compile(
+            r"^(?:\d{4}년도?|\d{4}년|\d{4}|\b(?:이번|저번|다음)\s*학기|\b[12]학기)\s*"
+        )
+        cleaned = academic_noise.sub("", cleaned).strip()
+        academic_noise_term = re.compile(
+            r"^(?:[12]학기|여름계절학기|겨울계절학기|계절학기)\s*"
+        )
+        cleaned = academic_noise_term.sub("", cleaned).strip()
+
+        course_suffix = re.compile(
+            r"(?:\s*(?:강의계획서\s*(?:평가\s*비율|주차별\s*계획|평가비율|주차별계획|내용)?|"
+            r"평가\s*비율이나\s*주차별\s*계획|"
+            r"평가\s*비율|주차별\s*계획|평가비율|주차별계획|"
+            r"개설강의|개설\s*강의|개설과목|개설\s*과목|수강편람|강의목록|강의\s*목록|수업목록|수업\s*목록|강의계획서|실라버스|수업계획|목록|리스트))+$"
+        )
+        temp_cleaned = course_suffix.sub("", cleaned).strip()
+        if len(temp_cleaned) >= 2:
+            cleaned = temp_cleaned
+
         pattern = re.compile(r"(?:교수님|교수|선생님|조교님|학부장님|학과장님|과사|연구실|사무실|연락처|전화번호|이메일|메일|번호)$")
         changed = True
         while changed and len(cleaned) >= 2:

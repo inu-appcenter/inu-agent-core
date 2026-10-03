@@ -2035,12 +2035,23 @@ class AgentOrchestrator:
 
                             lines = [f"\n[인천대학교 개설 강의/수업 조회 결과 - {req_year}년도 {req_term_str}{dept_hint}]:"]
                             is_empty_course = False
-                            if not courses and not mcp_summary:
+                            api_err_msg = ""
+                            if isinstance(res, dict) and res.get("error"):
+                                api_err_msg = res.get("error")
+                                if res.get("status_code") == 401:
+                                    api_err_msg = "포털 로그인/인증이 만료되었거나 미인증 상태입니다 (401 Unauthorized)."
+
+                            if api_err_msg:
+                                status_state = "failed"
+                                status_title = f"{tool_display_name} 조회 실패"
+                                lines.append(f"- ⚠️ 교내 시스템 조회 실패: {api_err_msg}")
+                                summary_out = "\n".join(lines) + "\n"
+                            elif not courses and not mcp_summary:
                                 is_empty_course = True
                             elif mcp_summary and any(kw in mcp_summary for kw in ["없습니다", "찾지 못했습니다", "0건", "없음"]) and not courses:
                                 is_empty_course = True
 
-                            if not is_empty_course:
+                            if not api_err_msg and not is_empty_course:
                                 status_state = "completed"
                                 status_title = f"{tool_display_name} 확인 완료"
                                 if courses:
@@ -2071,7 +2082,7 @@ class AgentOrchestrator:
                                 elif mcp_summary:
                                     lines.append(mcp_summary)
                                 lines.append("💡 지침: 위 개설 강의 목록을 사용자에게 친절하고 명확하게 안내하세요. 가상의 과목이나 강의실을 지어내지 마세요.")
-                            else:
+                            elif not api_err_msg:
                                 status_state = "empty"
                                 status_title = f"{tool_display_name} 결과 없음"
                                 lines.append("- 조회된 개설 강의가 없습니다.")
