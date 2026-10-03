@@ -1,19 +1,339 @@
 [
   {
+    "id": "LV1_CAF_01",
+    "name": "학식 메뉴 조회 (학생식당)",
+    "category": "Level 1: 단일조회",
+    "question": "오늘 학생식당 학식 메뉴 뭐야?",
+    "status_code": 200,
+    "duration": 8.86,
+    "events_count": 444,
+    "tokens_count": 180,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**죄송합니다. 오늘 학생식당의 식단 정보가 등록되어 있지 않거나 운영하지 않습니다.**\n\n현재 조회된 시스템 데이터에 따르면, 오늘 학생식당의 식사 정보는 다음과 같습니다.\n\n### 🍴 학생식당 식단 안내\n| 구분...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n 오늘\n(\n2\n0\n2\n6\n년\n \n1\n0\n월\n \n3\n일\n,\n 토\n요일\n)\n의\n 학생\n식\n당\n 메뉴\n를\n 물\n어\n보\n았습니다\n.\n '\napi\n_\nget\nMenu\n'\n 도\n구..."
+  },
+  {
+    "id": "LV1_CAF_02",
+    "name": "학식 메뉴 조회 (제2기숙사)",
+    "category": "Level 1: 단일조회",
+    "question": "오늘 2기숙사 식당 저녁 메뉴 알려줘",
+    "status_code": 200,
+    "duration": 13.08,
+    "events_count": 324,
+    "tokens_count": 134,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**현재 2기숙사 식당의 석식(저녁) 메뉴 정보가 등록되어 있지 않습니다.**\n\n### 🍴 2기숙사 식당 식단 안내\n> 시스템 조회 결과, 오늘 제공되는 저녁 메뉴에 대한 정보가 확인되지 않습니다.\n\n| 구분 | 식...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n '\n2\n기\n숙\n사\n 식\n당\n'\n의\n '\n오늘\n 저\n녁\n 메뉴\n'\n를\n 물\n어\n보\n았습니다\n.\n 현재\n 날\n짜\n는\n \n2\n0\n2\n6\n년\n \n1\n0\n월\n \n3\n일\n(\n토\n..."
+  },
+  {
+    "id": "LV1_WEATHER_01",
+    "name": "송도 캠퍼스 날씨 및 미세먼지",
+    "category": "Level 1: 단일조회",
+    "question": "송도 캠퍼스 지금 날씨랑 미세먼지 어때?",
+    "status_code": 200,
+    "duration": 35.19,
+    "events_count": 294,
+    "tokens_count": 184,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**현재 송도 캠퍼스의 날씨는 구름이 조금 끼어 있으며, 미세먼지 농도는 '좋음' 상태로 매우 쾌적합니다.**\n\n### 🌤️ 송도 캠퍼스 실시간 기상 정보\n> 현재 캠퍼스에서 활동하시기에 아주 좋은 날씨입니다!\n\n|...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n 송\n도\n 캠\n퍼\n스의\n 현재\n 날\n씨\n와\n 미\n세\n먼\n지\n 정보를\n 요청\n했습니다\n.\n `\napi\n_\nget\nWeather\n`\n 도\n구를\n 사용하여\n 실\n시간\n 날\n씨..."
+  },
+  {
+    "id": "LV1_BUS_01",
+    "name": "실시간 버스 도착 정보",
+    "category": "Level 1: 단일조회",
+    "question": "공과대학 정류소에 버스 언제 와?",
+    "status_code": 200,
+    "duration": 10.49,
+    "events_count": 241,
+    "tokens_count": 174,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**현재 공과대학 정류소에 도착 예정인 인팁 서비스 버스가 없습니다.**\n\n### 🚌 버스 도착 정보 안내\n> 현재 조회된 실시간 버스 도착 정보에 따르면, 요청하신 정류소에 운행 대기 중이거나 곧 도착할 예정인 버...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n '\n공\n과\n대학\n'\n 정\n류\n소\n의\n 실\n시간\n 버\n스\n 도착\n 정보를\n 요청\n했습니다\n.\n 먼저\n '\n공\n과\n대학\n'\n 정\n류\n소\n의\n ID\n(\nb\nstop\nId\n)..."
+  },
+  {
+    "id": "LV1_CONTACT_01",
+    "name": "교내 전화번호부 (과사무실)",
+    "category": "Level 1: 단일조회",
+    "question": "컴퓨터공학부 과사무실 전화번호 알려줘",
+    "status_code": 200,
+    "duration": 7.04,
+    "events_count": 283,
+    "tokens_count": 152,
+    "cards_count": 0,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**현재 교내 시스템의 일시적인 오류로 인해 컴퓨터공학부 학과 사무실의 전화번호를 불러오지 못했습니다.**\n\n> ⚠️ **안내 말씀**\n> 교내 부서/학과 연락처 조회 중 서버 응답 지연(API request fai...",
+    "cards_summary": [],
+    "thinking_preview": "사용\n자가\n '\n컴\n퓨\n터\n공\n학\n부\n'\n 과\n사\n무\n실\n의\n 전화\n번호\n를\n 요청\n했습니다\n.\n 단\n과\n대학\n 학\n과\n사\n무\n실\n 전화\n번호\n를\n 조회\n할\n 수\n 있는\n `\nap..."
+  },
+  {
+    "id": "LV1_CONTACT_02",
+    "name": "교내 전화번호부 (교수 연구실)",
+    "category": "Level 1: 단일조회",
+    "question": "박문주 교수님 연구실 번호랑 위치 어디야?",
+    "status_code": 200,
+    "duration": 4.6,
+    "events_count": 205,
+    "tokens_count": 139,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**박문주 교수님의 연구실 전화번호는 (구내) 8556입니다.**\n\n현재 시스템 조회 결과에 따르면, 교수님의 연구실 위치에 대한 정보는 등록되어 있지 않아 정확한 안내가 어렵습니다.\n\n> 💡 **안내 사항**\n> ...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "박\n문\n주\n 교수\n님의\n 연구\n실\n 번\n호\n와\n 위치\n를\n 찾\n기\n 위해서는\n 먼저\n 교수\n님의\n 소\n속\n 학\n과\n나\n 정보를\n 알아\n야\n 합니다\n.\n `\napi\n_\nsearch\n..."
+  },
+  {
+    "id": "LV1_CALENDAR_01",
+    "name": "학사 일정 캘린더",
+    "category": "Level 1: 단일조회",
+    "question": "이번 2학기 중간고사 일정 언제야?",
+    "status_code": 200,
+    "duration": 10.1,
+    "events_count": 440,
+    "tokens_count": 342,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "안녕하세요! 인천대학교 AI 에이전트 챗불이입니다. 😊\n\n**현재 제공된 학사일정 데이터에는 이번 2학기 중간고사 기간에 대한 구체적인 정보가 등록되어 있지 않습니다.**\n\n중간고사 일정은 학과나 수업별로 차이가 있...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n \n2\n0\n2\n6\n학년\n도\n \n2\n학\n기\n 중간\n고사\n 일\n정을\n 물\n어\n보\n았습니다\n.\n 현재\n 시\n점\n은\n \n2\n0\n2\n6\n년\n \n1\n0\n월\n \n3\n일\n이\n므로\n,\n..."
+  },
+  {
+    "id": "LV1_SEARCH_01",
+    "name": "전 도메인 통합 검색 (장학금 공지)",
+    "category": "Level 1: 단일조회",
+    "question": "장학금 신청 공지사항 찾아줘",
+    "status_code": 200,
+    "duration": 11.19,
+    "events_count": 537,
+    "tokens_count": 398,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**장학금 신청과 관련된 최신 공지사항 검색 결과입니다.**\n\n현재 확인되는 장학금 관련 공지사항은 다음과 같습니다. 신청 기간과 대상 학과를 반드시 확인하시어 기한 내에 신청하시기 바랍니다.\n\n### 📢 장학금 관...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n '\n장\n학\n금\n 신청\n 공\n지\n사항\n'\n을\n 요청\n했습니다\n.\n 장\n학\n금\n 관련\n 정보\n는\n 학교\n 전체\n 공\n지\n사항\n이나\n 학\n사\n 규\n정\n(\nR\nAG\n)\n에\n ..."
+  },
+  {
+    "id": "LV2_RAG_01",
+    "name": "컴공 졸업인증제(영어) 요건",
+    "category": "Level 2: RAG 규정",
+    "question": "컴퓨터공학부 졸업하려면 졸업인증제 토익 몇 점 넘어야 해?",
+    "status_code": 200,
+    "duration": 15.75,
+    "events_count": 443,
+    "tokens_count": 284,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**컴퓨터공학부 학생의 경우, 영어졸업인증을 위해 필요한 TOEIC 점수는 700점 이상입니다.**\n\n### 🎓 영어졸업인증 자격기준 안내\n[졸업 영어졸업인증제 - 영어졸업인증제] 규정에 따르면, 영어졸업인증 점수는...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n 컴퓨터\n공\n학\n부\n의\n 졸업\n인\n증\n제\n(\n토\n익\n 점\n수\n 기준\n)\n에\n 대해\n 질문\n하였습니다\n.\n 이\n 정보\n는\n 인천\n대학교\n의\n 학\n사\n 규\n정\n 및\n 졸업\n..."
+  },
+  {
+    "id": "LV2_RAG_02",
+    "name": "복수전공 신청 자격 및 기준",
+    "category": "Level 2: RAG 규정",
+    "question": "복수전공 신청 자격과 조건이 어떻게 돼?",
+    "status_code": 200,
+    "duration": 25.52,
+    "events_count": 865,
+    "tokens_count": 803,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**복수전공의 신청 자격은 2학기 이상 이수한 재학생 및 복학예정자이며, 이수 조건은 주전공과 복수전공 학과 각각의 전공 과목을 42학점 이상 이수하는 것입니다.**\n\n### 📋 복수전공 신청 자격\n[인천대학교 학칙...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n 복\n수\n전\n공\n 신청\n 자\n격\n과\n 조건\n에\n 대해\n 질문\n하였습니다\n.\n 이는\n 학\n칙\n 및\n 학\n사\n 규\n정과\n 관련된\n 내용\n이\n므로\n,\n 인천\n대학교\n의\n 공식..."
+  },
+  {
+    "id": "LV2_RAG_03",
+    "name": "휴학 기간 규정",
+    "category": "Level 2: RAG 규정",
+    "question": "일반 휴학은 한 번에 최대 몇 학기까지 가능해?",
+    "status_code": 200,
+    "duration": 20.66,
+    "events_count": 547,
+    "tokens_count": 406,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**일반휴학은 한 번에 최대 1년(2학기)까지 가능합니다.**\n\n### 📅 일반휴학 기간 및 신청 안내\n[학적 휴복학 - 휴·복학] 및 [인천대학교 학칙 시행세칙 제5장 휴학·복학 제21조(휴학기간)] 규정에 따른 ...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n '\n일\n반\n 휴\n학\n'\n의\n 최대\n 가능\n 학\n기에\n 대해\n 질문\n하였습니다\n.\n 이는\n 학\n칙\n 및\n 학\n사\n 규\n정에\n 관련된\n 내용\n이\n므로\n,\n 인천\n대학교\n의..."
+  },
+  {
     "id": "LV3_AUTH_COURSE_01",
     "name": "개설강의 조회 (토큰 포함 정상 조회)",
     "category": "Level 3: 인증 전용 (개설강의)",
     "question": "2026년 2학기 컴퓨터공학부 개설강의 목록 보여줘",
     "status_code": 200,
-    "duration": 9.5,
-    "events_count": 307,
-    "tokens_count": 180,
+    "duration": 15.39,
+    "events_count": 397,
+    "tokens_count": 285,
     "cards_count": 0,
     "actions_count": 0,
     "success": true,
     "failure_reasons": [],
-    "full_text_preview": "**현재 교내 시스템의 일시적인 오류로 인해 2026학년도 2학기 컴퓨터공학부의 개설 강의 목록을 불러오지 못했습니다.**\n\n> ⚠️ **안내 말씀**\n> 현재 `api_getCourseOfferings` 서비스 호...",
+    "full_text_preview": "**2026학년도 2학기 컴퓨터공학부의 개설 강의 목록을 안내해 드립니다.**\n\n현재 시스템을 통해 확인된 이번 학기 컴퓨터공학부의 개설 강의 정보는 다음과 같습니다.\n\n### 📚 2026학년도 2학기 개설 강의 목...",
     "cards_summary": [],
     "thinking_preview": "사용\n자가\n \n2\n0\n2\n6\n년\n \n2\n학\n기\n 컴퓨터\n공\n학\n부\n의\n 개\n설\n 강의\n 목록\n을\n 요청\n했습니다\n.\n '\napi\n_\nget\nCourse\nOffer\nings\n'\n 도..."
+  },
+  {
+    "id": "LV3_GUEST_COURSE_02",
+    "name": "개설강의 조회 (비로그인 게스트 - 401 유도 또는 Fallback)",
+    "category": "Level 3: 비로그인 가드레일",
+    "question": "개설강의 목록 조회해줘",
+    "status_code": 200,
+    "duration": 4.99,
+    "events_count": 331,
+    "tokens_count": 249,
+    "cards_count": 0,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**현재 인팁(INTIP) 앱에 등록되거나 동기화된 개설 강의(시간표) 정보가 없습니다.**\n\n### 🔍 강의 목록 조회 결과\n> 현재 시스템에서 조회된 수강 신청 과목이나 시간표 데이터가 존재하지 않습니다.\n\n사용...",
+    "cards_summary": [],
+    "thinking_preview": "사용\n자가\n '\n개\n설\n강\n의\n 목록\n 조회\n'\n를\n 요청\n했\n으나\n,\n 어떤\n 학\n기\n,\n 어떤\n 학\n과\n,\n 혹은\n 어떤\n 키\n워\n드로\n 검색\n할\n지에\n 대한\n 구\n체\n적인\n ..."
+  },
+  {
+    "id": "LV3_LIBRARY_01",
+    "name": "도서관 실시간 좌석 현황",
+    "category": "Level 3: 도서관 좌석",
+    "question": "지금 학산도서관 힐링존에 자리 남아있어?",
+    "status_code": 200,
+    "duration": 14.53,
+    "events_count": 667,
+    "tokens_count": 362,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**현재 학산도서관 힐링존의 잔여 좌석은 0석으로, 이용 가능한 자리가 없습니다.**\n\n### 📚 학산도서관 실시간 좌석 현황 안내\n\n문의하신 힐링존을 포함하여, 현재 이용 가능한 다른 공간들을 안내해 드릴게요.\n\n...",
+    "cards_summary": [
+      "LIBRARY_ROOMS"
+    ],
+    "thinking_preview": "사용\n자가\n 학\n산\n도\n서\n관\n \n힐\n링\n존\n의\n 실\n시간\n 잔\n여\n 좌\n석\n 여\n부를\n 물\n어\n보\n았습니다\n.\n '\nlibrary\n_\nreading\n_\nrooms\n_\nstatus..."
+  },
+  {
+    "id": "LV4_ACTION_TIMETABLE_01",
+    "name": "오늘의 시간표 조회 (Client Action 디스패치)",
+    "category": "Level 4: 단말 액션",
+    "question": "나 오늘 수업 뭐 있어?",
+    "status_code": 200,
+    "duration": 8.86,
+    "events_count": 382,
+    "tokens_count": 221,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**현재 인팁(INTIP)에 동기화된 이번 학기 수강신청 시간표가 등록되어 있지 않습니다.**\n\n안녕하세요! 오늘 수업 일정을 확인하고 싶으시군요. 하지만 안타깝게도 현재 시스템상으로는 등록되어 있거나 동기화된 수업...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자의\n 오늘\n 수업\n 일\n정을\n 확인\n하기\n 위해서는\n 학생\n 개인\n의\n 수\n강\n신\n청\n 내\n역\n 및\n 시간\n표\n 정보\n가\n 필요\n합니다\n.\n 따라서\n [\nPORT\nAL\n]\n..."
+  },
+  {
+    "id": "LV4_MUTATION_DORM_01",
+    "name": "기숙사 외박 신청 (Confirmation 확인 유도)",
+    "category": "Level 4: 상태변경 확인",
+    "question": "오늘부터 일요일까지 기숙사 외박 신청해줘",
+    "status_code": 200,
+    "duration": 20.2,
+    "events_count": 485,
+    "tokens_count": 319,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "죄송합니다. 저는 인천대학교 학사 행정 및 대학 생활 정보를 안내하는 어시스턴트로서, **사용자를 대신하여 기숙사 외박 신청과 같은 행정 절차를 직접 수행하거나 시스템에 접속하여 신청을 완료해 드리는 기능은 갖추고 ...",
+    "cards_summary": [
+      null
+    ],
+    "thinking_preview": "사용\n자가\n '\n오늘\n부터\n 일\n요일\n까지\n 기\n숙\n사\n 외\n박\n 신청\n'\n을\n 요청\n했습니다\n.\n 하지만\n 현재\n 제공\n된\n 도\n구\n 카\n탈\n로그\n에는\n 기\n숙\n사\n 외\n박\n 신..."
+  },
+  {
+    "id": "LV5_MULTIHOP_ADVISOR_01",
+    "name": "지도교수 확인 후 연락처 연쇄 조회",
+    "category": "Level 5: 복합 멀티홉",
+    "question": "내 지도교수님 연구실 위치랑 전화번호 알려줘",
+    "status_code": 200,
+    "duration": 9.31,
+    "events_count": 200,
+    "tokens_count": 133,
+    "cards_count": 2,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**박문주 교수님의 연락처와 연구실 위치 정보는 현재 교내 전화번호부 DB에 등록되어 있지 않습니다.**\n\n> 💡 **안내 사항**\n> 교수님의 개인 연락처(연구실 번호)가 시스템에 등록되어 있지 않아 직접적인 안내...",
+    "cards_summary": [
+      "ACADEMIC_INFO",
+      null
+    ],
+    "thinking_preview": "사용\n자의\n 지도\n교\n수\n님\n 연구\n실\n 위치\n와\n 전화\n번호\n를\n 알\n기\n 위해서는\n 먼저\n 사용\n자의\n 지도\n교\n수\n 성\n함을\n 알아\n내\n야\n 합니다\n.\n 따라서\n '\nacti..."
+  },
+  {
+    "id": "LV5_MULTIHOP_GAP_LIB_02",
+    "name": "수업 공강 확인 후 도서관 좌석 추천",
+    "category": "Level 5: 복합 멀티홉",
+    "question": "나 오늘 수업 끝나고 공강 시간 동안 쉴 만한 도서관 자리 있어?",
+    "status_code": 200,
+    "duration": 10.96,
+    "events_count": 714,
+    "tokens_count": 534,
+    "cards_count": 1,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**현재 학산도서관의 대부분의 열람실과 라운지에 여유 좌석이 있어 편하게 이용하실 수 있습니다.**\n\n공강 시간 동안 조용히 공부하거나 휴식을 취하기 좋은 공간들을 정리해 드릴게요. 원하시는 분위기에 맞춰 선택해 보...",
+    "cards_summary": [
+      "LIBRARY_ROOMS"
+    ],
+    "thinking_preview": "사용\n자가\n 공\n강\n 시간에\n \n쉴\n 만\n한\n 도\n서\n관\n 자\n리가\n 있는지\n 물\n어\n보\n았습니다\n.\n 이를\n 확인\n하기\n 위해서는\n 먼저\n 학\n산\n도\n서\n관\n의\n 실\n시간\n 잔\n..."
   }
 ]

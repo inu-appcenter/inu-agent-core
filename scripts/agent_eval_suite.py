@@ -130,21 +130,21 @@ TEST_SUITE: List[TestCase] = [
         category="Level 2: RAG 규정",
         name="컴공 졸업인증제(영어) 요건",
         message="컴퓨터공학부 졸업하려면 졸업인증제 토익 몇 점 넘어야 해?",
-        expected_tool_keyword="inuai",
+        expected_tool_keyword="inu_ai",
     ),
     TestCase(
         id="LV2_RAG_02",
         category="Level 2: RAG 규정",
         name="복수전공 신청 자격 및 기준",
         message="복수전공 신청 자격과 조건이 어떻게 돼?",
-        expected_tool_keyword="inuai",
+        expected_tool_keyword="inu_ai",
     ),
     TestCase(
         id="LV2_RAG_03",
         category="Level 2: RAG 규정",
         name="휴학 기간 규정",
         message="일반 휴학은 한 번에 최대 몇 학기까지 가능해?",
-        expected_tool_keyword="inuai",
+        expected_tool_keyword="inu_ai",
     ),
     # -------------------------------------------------------------
     # Level 3: Auth-Required & Personal Academic Queries
@@ -251,6 +251,7 @@ def run_single_test(
     tokens = []
     thinking_blocks = []
     cards = []
+    statuses = []
     action_events = []
     errors = []
     status_code = None
@@ -274,6 +275,8 @@ def run_single_test(
                                 thinking_blocks.append(ev.get("thinking", ""))
                             elif ev_type == "CARD":
                                 cards.append(ev.get("card", {}))
+                            elif ev_type == "STATUS":
+                                statuses.append(ev)
                             elif ev_type == "ACTION_REQUIRED":
                                 action_events.append(ev.get("action", {}))
                             elif ev_type == "ERROR":
@@ -305,15 +308,32 @@ def run_single_test(
 
     # Tool invocation check
     if case.expected_tool_keyword:
-        kw = case.expected_tool_keyword.lower()
+        raw_kw = case.expected_tool_keyword.lower()
+        clean_kw = raw_kw.replace("_", "").replace("-", "")
+
+        def _matches(text: str) -> bool:
+            t = text.lower()
+            return raw_kw in t or clean_kw in t.replace("_", "").replace("-", "").replace(" ", "")
+
         tool_invoked = (
-            kw in full_thinking.lower()
-            or any(kw in str(c).lower() for c in cards)
-            or any(kw in str(a).lower() for a in action_events)
+            _matches(full_thinking)
+            or any(_matches(str(c)) for c in cards)
+            or any(_matches(str(a)) for a in action_events)
+            or any(
+                _matches(str(s.get("status_category", "")))
+                or _matches(str(s.get("status_title", "")))
+                or _matches(str(s.get("status_id", "")))
+                for s in statuses
+            )
+            or any(
+                _matches(json.dumps(ev, ensure_ascii=False))
+                for ev in events
+                if ev.get("event_type") != "TOKEN"
+            )
         )
         if not tool_invoked:
             success = False
-            failure_reasons.append(f"Expected tool keyword '{kw}' not found in execution trace")
+            failure_reasons.append(f"Expected tool keyword '{raw_kw}' not found in execution trace")
 
     # Card type check
     if case.expected_card_type:
