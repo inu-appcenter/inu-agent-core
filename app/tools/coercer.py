@@ -88,12 +88,17 @@ class SchemaCoercer:
                     coerced["keyword"] = coerced.pop(alias)
                     break
 
-        # Academic Year & Term Auto-Defaults
+        # Academic Year, Term, Month, Day Auto-Defaults (Korean KST timezone)
+        kst_now = datetime.now(timezone(timedelta(hours=9)))
         if "year" in properties and (not coerced.get("year")):
-            coerced["year"] = datetime.now(timezone(timedelta(hours=9))).year
+            coerced["year"] = kst_now.year
         if "term" in properties and (not coerced.get("term")):
-            curr_month = datetime.now(timezone(timedelta(hours=9))).month
+            curr_month = kst_now.month
             coerced["term"] = "SECOND" if curr_month >= 7 else "FIRST"
+        if "month" in properties and (not coerced.get("month")):
+            coerced["month"] = kst_now.month
+        if "day" in properties and (not coerced.get("day")):
+            coerced["day"] = kst_now.weekday() + 1
 
         # Course offerings parameter resilience:
         # If deptName is passed, always populate keyword as fallback to avoid 400 Bad Request

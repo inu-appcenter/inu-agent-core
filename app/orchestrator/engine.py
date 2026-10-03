@@ -1164,10 +1164,23 @@ class AgentOrchestrator:
                                 emitted_cards.add(target_domain)
                                 emitted_cards.add(tool.category)
 
-                        summary_out = (
-                            f"\n[PORTAL_STATUS]: 학생의 포털 계정은 정상 연동되어 있으나, 현재 세션에 동기화된 학적 정보를 불러오지 못했습니다. ({err_msg}) "
-                            "학생에게 계정 연동은 잘 유지되어 있으니 잠시 후 같은 질문을 다시 시도해 주시거나 인팁 모바일 앱에서 확인해 달라고 친절하게 안내하세요. (⚠️ 중요 지침: 계정 연동 카드를 다시 누르라고 절대 안내하지 마세요!)\n"
-                        )
+                        if "tuition" in tool.name.lower():
+                            summary_out = (
+                                "\n[PORTAL_STATUS]: 현재 챗불이 AI 에이전트 시스템에서는 등록금 납부 고지서의 직접 조회를 지원하지 않습니다 (미지원 학사 영역). "
+                                "학생의 기기나 세션 문제로 인한 실패가 아니므로 절대 사용자나 세션 탓을 하지 마십시오. "
+                                "학생에게 '현재 챗불이 AI에서는 등록금 납부 고지서 직접 조회를 지원하지 않습니다. 인천대학교 포털 종합정보시스템(ERP) 웹사이트에서 확인해 주시기 바랍니다'라고 서비스 한계를 솔직하게 안내하세요. (⚠️ 중요 지침: 계정 연동 카드를 누르라고 절대 안내하지 마세요!)\n"
+                            )
+                        elif "scholarship" in tool.name.lower():
+                            summary_out = (
+                                "\n[PORTAL_STATUS]: 현재 챗불이 AI 에이전트 시스템에서는 장학금 수혜 상세 내역의 직접 조회를 지원하지 않습니다 (미지원 학사 영역). "
+                                "학생의 기기나 세션 문제로 인한 실패가 아니므로 절대 사용자나 세션 탓을 하지 마십시오. "
+                                "학생에게 '현재 챗불이 AI에서는 장학금 상세 수혜 내역 직접 조회를 지원하지 않습니다. 인천대학교 포털 종합정보시스템 웹사이트에서 확인해 주시기 바랍니다'라고 서비스 한계를 솔직하게 안내하세요. (⚠️ 중요 지침: 계정 연동 카드를 누르라고 절대 안내하지 마세요!)\n"
+                            )
+                        else:
+                            summary_out = (
+                                f"\n[PORTAL_STATUS]: 학생의 포털 계정은 정상 연동되어 있으나, 현재 세션에 동기화된 학적 정보를 불러오지 못했습니다. ({err_msg}) "
+                                "학생에게 계정 연동은 잘 유지되어 있으니 잠시 후 같은 질문을 다시 시도해 주시거나 인팁 모바일 앱에서 확인해 달라고 친절하게 안내하세요. (⚠️ 중요 지침: 계정 연동 카드를 다시 누르라고 절대 안내하지 마세요!)\n"
+                            )
                     else:
                         if tool.category not in emitted_cards:
                             auth_card = CardSynthesizer.synthesize_for_domain(
@@ -1810,13 +1823,33 @@ class AgentOrchestrator:
 
                             courses = s_data.get("courses", {}).get("items", []) if isinstance(s_data.get("courses"), dict) else []
                             if courses:
-                                lines.append("- 📚 개설강의:")
-                                for c in courses[:3]:
-                                    c_name = c.get("courseName") or "강의"
-                                    prof = c.get("professor") or ""
-                                    time_room = c.get("timeRoom") or ""
+                                # 현재 시점 기준 학기 표기 보강 (통합검색 강의 목록의 연도/학기 식별력 제고)
+                                from datetime import datetime, timezone, timedelta
+                                kst_dt = datetime.now(timezone(timedelta(hours=9)))
+                                cur_term_str = "1학기" if 3 <= kst_dt.month <= 8 else "2학기"
+                                cur_year = kst_dt.year if kst_dt.month >= 3 else kst_dt.year - 1
+                                lines.append(f"- 📚 개설강의 [{cur_year}학년도 {cur_term_str}]:")
+                                for c in courses[:5]:
+                                    c_name = c.get("courseName") or c.get("title") or "강의"
+                                    # HTML <mark> 태그 제거
+                                    c_name = re.sub(r"</?mark>", "", c_name)
+                                    prof = c.get("professor") or c.get("prof") or ""
+                                    prof = re.sub(r"</?mark>", "", prof)
+                                    time_room = c.get("timeRoom") or c.get("room") or ""
                                     credit = c.get("credit") or ""
-                                    lines.append(f"  • {c_name} ({prof} 교수, {time_room}, {credit}학점)".strip())
+                                    hy_name = c.get("hyName") or ""  # 학년 (예: 3학년)
+                                    isu_name = c.get("isuName") or ""  # 이수구분 (예: 전공선택, 전필)
+                                    sub_num = c.get("subjectNumber") or ""  # 학수번호
+                                    
+                                    details = []
+                                    if prof: details.append(f"{prof} 교수")
+                                    if isu_name: details.append(isu_name)
+                                    if hy_name: details.append(hy_name)
+                                    if credit: details.append(f"{credit}학점")
+                                    if time_room: details.append(time_room)
+                                    if sub_num: details.append(f"학수번호: {sub_num}")
+                                    det_str = f" ({', '.join(details)})" if details else ""
+                                    lines.append(f"  • {c_name}{det_str}".strip())
 
                             clubs = s_data.get("clubs", {}).get("items", []) if isinstance(s_data.get("clubs"), dict) else []
                             if clubs:
@@ -1991,7 +2024,14 @@ class AgentOrchestrator:
                                 courses = [courses]
 
                             mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                            lines = [f"\n[인천대학교 개설 강의/수업 조회 결과 ({tool_display_name})]:"]
+                            # 파라미터에서 year, term, deptName 추출
+                            req_year = final_args.get("year") or datetime.now().year
+                            raw_term = str(final_args.get("term") or "").upper()
+                            term_map = {"FIRST": "1학기", "SECOND": "2학기", "SUMMER": "여름계절학기", "WINTER": "겨울계절학기"}
+                            req_term_str = term_map.get(raw_term, "2학기" if datetime.now().month >= 7 else "1학기")
+                            dept_hint = f" ({final_args.get('deptName')})" if final_args.get("deptName") else ""
+
+                            lines = [f"\n[인천대학교 개설 강의/수업 조회 결과 - {req_year}년도 {req_term_str}{dept_hint}]:"]
                             is_empty_course = False
                             if not courses and not mcp_summary:
                                 is_empty_course = True
@@ -2013,7 +2053,9 @@ class AgentOrchestrator:
                                             room = c.get("timeRoom") or c.get("classroom") or ""
                                             credit = c.get("credit") or c.get("credits") or ""
                                             code = c.get("courseCode") or c.get("subjectNumber") or ""
-                                            details = []
+                                            c_dept = c.get("department") or c.get("departmentName") or c.get("dept") or ""
+                                            details = [f"{req_year}년 {req_term_str}"]
+                                            if c_dept: details.append(f"개설학과: {c_dept}")
                                             if prof: details.append(f"교수: {prof}")
                                             if room: details.append(f"강의실/시간: {room}")
                                             if credit: details.append(f"{credit}학점")
