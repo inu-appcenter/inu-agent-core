@@ -106,7 +106,8 @@ class AgentOrchestrator:
         # Ensure essential core domain tools are available in the candidate pool
         core_categories = [
             "SEARCH", "PORTAL", "LMS", "DIRECTORY", "INU_AI_KNOWLEDGE", "LIBRARY",
-            "CAFETERIA", "BUS", "TIMETABLE", "CAMPUS_WATCH", "NOTICE", "SCHEDULE"
+            "CAFETERIA", "BUS", "TIMETABLE", "CAMPUS_WATCH", "NOTICE", "SCHEDULE",
+            "COURSE", "WEATHER"
         ]
         existing_cats = {t.category.upper() for t in candidate_tools}
         for cat in core_categories:

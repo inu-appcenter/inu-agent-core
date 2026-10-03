@@ -17,13 +17,15 @@ from app.llm.embeddings import get_embeddings, FastEmbedBackend, MockEmbeddingBa
 def serialize_tool(tool: BaseTool) -> str:
     """
     Serialize a BaseTool instance into a clean semantic document for vector embedding.
-    Uses the tool's natural human-readable description and detailed description.
+    Uses the tool's natural human-readable description and concise summary.
+    Avoids vector dilution from long technical API syntax manuals.
     """
-    parts = [tool.description or tool.name]
+    parts = [tool.name, tool.description or ""]
     if hasattr(tool, "detail_desc") and getattr(tool, "detail_desc", None):
         detail = str(tool.detail_desc).strip()
-        if detail and detail != tool.description:
-            parts.append(detail)
+        first_summary = detail.split("\n\n")[0].split("\n-")[0].strip()
+        if first_summary and first_summary != tool.description and len(first_summary) < 200:
+            parts.append(first_summary)
     return " - ".join(parts).strip()
 
 
@@ -177,13 +179,19 @@ class SemanticToolRetriever:
             clean = re.sub(r"(에서|으로|로|은|는|이|가|을|를|과|와|의|해줘|알려줘|조회해줘|보여줘)$", "", w)
             clean_words.append(clean if len(clean) >= 2 else w)
 
+        # Decompose compound words (e.g. '개설강의' -> '개설', '강의') for Korean agglutinative matching
+        expanded_words = list(clean_words)
+        for w in clean_words:
+            if len(w) == 4 and not w.isdigit():
+                expanded_words.extend([w[:2], w[2:]])
+
         scored_tools = []
         for idx, tool in enumerate(self.tools):
             dense_sim = float(dense_scores[idx])
 
             doc_text = self.tool_lexical_texts[idx]
-            lexical_hits = sum(1 for cw in clean_words if cw in doc_text) if clean_words else 0
-            lexical_boost = 0.5 * (lexical_hits / max(len(clean_words), 1)) if clean_words else 0.0
+            lexical_hits = sum(1 for cw in expanded_words if cw in doc_text) if expanded_words else 0
+            lexical_boost = 0.5 * (lexical_hits / max(len(expanded_words), 1)) if expanded_words else 0.0
 
             total_score = dense_sim + lexical_boost
             if total_score >= min_threshold:
