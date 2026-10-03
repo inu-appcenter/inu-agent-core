@@ -294,18 +294,18 @@ class AgentOrchestrator:
                         }]
                     else:
                         break
-                elif ("DIRECTORY" in executed_categories or "api_directory" in executed_tool_names or any("directory" in n.lower() or "contact" in n.lower() for n in executed_tool_names)) and empty_directory_queries and "SEARCH" not in executed_categories:
+                elif ("DIRECTORY" in executed_categories or "api_directory" in executed_tool_names or any("directory" in n.lower() or "contact" in n.lower() for n in executed_tool_names)) and (empty_directory_queries or "DIRECTORY" in failed_tool_categories) and "SEARCH" not in executed_categories:
                     search_tools = tool_registry.get_tools_by_category("SEARCH")
                     search_tool = search_tools[0] if search_tools else (
-                        tool_registry.get_tool("api_unified_search") or tool_registry.get_tool("unifiedSearch") or tool_registry.get_tool("unified_search")
+                        tool_registry.get_tool("api_unifiedSearch") or tool_registry.get_tool("api_unified_search") or tool_registry.get_tool("unifiedSearch") or tool_registry.get_tool("unified_search")
                     )
                     if search_tool:
-                        fallback_q = list(empty_directory_queries)[0] or request.message
+                        fallback_q = (list(empty_directory_queries)[0] if empty_directory_queries else None) or failed_tool_categories.get("DIRECTORY") or request.message
                         clean_q = AgentRouter._clean_entity_query(fallback_q) or fallback_q
-                        logger.info(f"Deterministic Multi-Hop: Chaining from empty DIRECTORY to {search_tool.name} for query '{clean_q}'")
+                        logger.info(f"Deterministic Multi-Hop: Chaining from empty/failed DIRECTORY to {search_tool.name} for query '{clean_q}'")
                         yield AgentStreamEvent(
                             event_type="THINKING",
-                            thinking=f"교내 전화번호부 DB에 '{clean_q}' 관련 연락처가 확인되지 않아, 인천대학교 전 도메인 통합 검색({search_tool.name})을 통해 학교 공식 웹페이지 및 부서 안내에서 연락처를 추가 탐색합니다.",
+                            thinking=f"교내 전화번호부에서 '{clean_q}' 관련 연락처가 확인되지 않거나 조회에 실패하여, 인천대학교 전 도메인 고도화 통합 검색({search_tool.name})을 통해 학교 공식 웹페이지 및 부서 안내에서 연락처와 위치를 추가 탐색합니다.",
                         )
                         from uuid import uuid4
                         tool_calls = [{
@@ -534,6 +534,8 @@ class AgentOrchestrator:
                             if st_state == "failed":
                                 q_val = fn_args.get("query") or fn_args.get("q") or request.message
                                 failed_tool_categories[target_tool.category.upper()] = str(q_val)
+                                if target_tool.category.upper() == "DIRECTORY":
+                                    empty_directory_queries.add(str(q_val))
                             elif st_state == "empty":
                                 q_val = fn_args.get("query") or fn_args.get("q") or request.message
                                 empty_tool_categories[target_tool.category.upper()] = str(q_val)
@@ -2152,7 +2154,8 @@ class AgentOrchestrator:
                 status_state="running",
             )
 
-            dir_tool = tool_registry.get_tool("api_directory")
+            dir_tool = tool_registry.get_tool("api_searchDirectory") or tool_registry.get_tool("api_getDirectory") or tool_registry.get_tool("api_directory")
+            contacts = []
             if dir_tool:
                 try:
                     dir_res = await dir_tool.execute(
@@ -2161,50 +2164,102 @@ class AgentOrchestrator:
                     )
                     dir_card = CardSynthesizer.synthesize_for_domain(
                         domain="DIRECTORY",
-                        tool_name="api_directory",
+                        tool_name=dir_tool.name,
                         data=dir_res,
                         query=orig_query,
                     )
                     if dir_card:
                         yield AgentStreamEvent(event_type="CARD", card=dir_card)
 
-                    contacts = dir_res if isinstance(dir_res, list) else (
-                        dir_res.get("contacts") or dir_res.get("data") or []
-                    ) if isinstance(dir_res, dict) else []
+                    if isinstance(dir_res, dict) and "error" not in dir_res:
+                        contacts = (
+                            dir_res.get("contents")
+                            or dir_res.get("items")
+                            or dir_res.get("contacts")
+                            or (dir_res.get("data", {}).get("contents") if isinstance(dir_res.get("data"), dict) else [])
+                            or (dir_res.get("data") if isinstance(dir_res.get("data"), list) else [])
+                            or []
+                        )
+                    elif isinstance(dir_res, list):
+                        contacts = dir_res
 
                     tool_summary_lines.append(f"\n[교내 전화번호부 {advisor_name} 교수님 연락처 검색 결과]:")
                     if contacts:
                         for c in contacts[:3]:
                             if isinstance(c, dict):
                                 c_name = c.get("name") or advisor_name
-                                c_dept = c.get("dept") or c.get("department") or ""
-                                c_tel = c.get("telephone") or c.get("phone") or c.get("tel") or "전화번호 없음"
+                                c_dept = c.get("detailAffiliation") or c.get("affiliation") or c.get("dept") or c.get("department") or ""
+                                c_tel = c.get("phoneNumber") or c.get("officePhoneNumber") or c.get("telephone") or c.get("phone") or c.get("tel") or "전화번호 미등록"
                                 c_email = c.get("email") or ""
-                                c_loc = c.get("location") or c.get("room") or ""
-                                tool_summary_lines.append(
-                                    f"- {c_name} ({c_dept}): 전화={c_tel}, 이메일={c_email}, 위치={c_loc}"
-                                )
+                                c_pos = c.get("position") or "교수"
+                                c_duties = c.get("duties") or ""
+                                c_loc = c.get("officeLocation") or c.get("location") or c.get("room") or ""
+                                line = f"- {c_name} {c_pos} ({c_dept}): 📞 {c_tel}" + (f", ✉️ {c_email}" if c_email else "") + (f", 위치: {c_loc}" if c_loc else "")
+                                if c_duties:
+                                    d_first = c_duties.split("\n")[0]
+                                    line += f" ({d_first})"
+                                tool_summary_lines.append(line)
                         chain_status_title = f"{advisor_name} 교수님 연락처 확인 완료"
+                        chain_status_state = "completed"
                     else:
-                        tool_summary_lines.append(f"- {advisor_name} 교수님의 공식 등록 연락처를 찾지 못했습니다.")
+                        tool_summary_lines.append(f"- {advisor_name} 교수님의 공식 등록 연락처가 교내 전화번호부 DB에 확인되지 않았습니다.")
                         chain_status_title = f"{advisor_name} 교수님 연락처 결과 없음"
+                        chain_status_state = "empty"
 
                     yield AgentStreamEvent(
                         event_type="STATUS",
                         status_id="contact_chain_search",
                         status_title=chain_status_title,
                         status_category="DIRECTORY",
-                        status_state="completed",
+                        status_state=chain_status_state,
                     )
                 except Exception as ex:
                     logger.warning(f"Error running chained api_directory: {ex}")
                     yield AgentStreamEvent(
                         event_type="STATUS",
                         status_id="contact_chain_search",
-                        status_title=f"{advisor_name} 교수님 연락처 조회 실패",
+                        status_title=f"{advisor_name} 교수님 전화번호부 조회 실패",
                         status_category="DIRECTORY",
                         status_state="failed",
                     )
+
+            # Fallback: If telephone directory had no results or failed, actively chain to Unified Search!
+            if not contacts:
+                search_tool = (
+                    tool_registry.get_tool("api_unifiedSearch")
+                    or tool_registry.get_tool("api_search")
+                    or tool_registry.get_tool("unifiedSearch")
+                )
+                if search_tool:
+                    yield AgentStreamEvent(
+                        event_type="STATUS",
+                        status_id="contact_chain_unified",
+                        status_title=f"전화번호부 미등록으로 전 도메인 통합 검색({advisor_name}) 대체 탐색 중...",
+                        status_category="SEARCH",
+                        status_state="running",
+                    )
+                    try:
+                        s_res = await search_tool.execute(
+                            {"q": advisor_name, "query": advisor_name},
+                            {"client": callback.client, "auth": "", "authorization": ""},
+                        )
+                        if isinstance(s_res, dict) and "error" not in s_res and s_res:
+                            tool_summary_lines.append(f"\n[인천대학교 전 도메인 통합 검색 대체 결과 ({advisor_name})]:")
+                            s_summary = s_res.get("summary") or ""
+                            if s_summary:
+                                tool_summary_lines.append(s_summary)
+                            else:
+                                s_data = s_res.get("data") or s_res
+                                tool_summary_lines.append(json.dumps(s_data, ensure_ascii=False)[:1000])
+                            yield AgentStreamEvent(
+                                event_type="STATUS",
+                                status_id="contact_chain_unified",
+                                status_title=f"전 도메인 통합 검색({advisor_name}) 확인 완료",
+                                status_category="SEARCH",
+                                status_state="completed",
+                            )
+                    except Exception as s_ex:
+                        logger.warning(f"Error running chained unified search: {s_ex}")
 
         # 4. Final LLM Response Synthesis Stream
         tool_summary_text = "\n".join(tool_summary_lines)

@@ -36,28 +36,46 @@ class ToolRegistry:
             return self._tools[name]
         # Case-insensitive and prefix-tolerant alias matching
         clean_name = name.replace("api_", "").replace("action_", "").replace("-", "_").lower()
+        # 1. Exact match on stripped tool name
         for t_name, t in self._tools.items():
             t_clean = t_name.replace("api_", "").replace("action_", "").replace("-", "_").lower()
-            if t_clean == clean_name or t.category.lower() == clean_name:
+            if t_clean == clean_name:
                 return t
 
-        # Domain alias mappings
+        # 2. Canonical domain alias mappings (prioritize primary search/query tools)
         if "contact" in clean_name or "directory" in clean_name:
+            for preferred in ["api_searchDirectory", "api_getDirectory", "searchDirectory", "getDirectory", "directory"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
             for t_name, t in self._tools.items():
                 if "directory" in t_name.lower():
                     return t
         elif "search" in clean_name:
+            for preferred in ["api_unifiedSearch", "api_search", "unifiedSearch", "search"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
             for t_name, t in self._tools.items():
                 if "search" in t_name.lower():
                     return t
         elif "club" in clean_name:
+            for preferred in ["api_getClubs", "api_club", "getClubs"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
             for t_name, t in self._tools.items():
                 if "club" in t_name.lower():
                     return t
         elif "lost" in clean_name:
+            for preferred in ["api_getLostProperties", "api_lostProperty", "getLostProperties"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
             for t_name, t in self._tools.items():
                 if "lost" in t_name.lower():
                     return t
+
+        # 3. Fallback to category match only if no name matched
+        for t_name, t in self._tools.items():
+            if t.category.lower() == clean_name:
+                return t
         return None
 
     def get_tools_by_category(self, category: str) -> List[BaseTool]:

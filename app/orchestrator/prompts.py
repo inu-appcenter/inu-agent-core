@@ -129,7 +129,7 @@ def get_tool_orchestration_prompt(client: str) -> str:
 
 8. **도메인별 최적 도구 직접 선택 가이드 (Direct Tool Selection Guide)**:
    - **개설 강의 / 수강편람 / 강의 목록 조회**: 학기별, 학과별 개설 과목이나 특정 강의 검색 시에는 불필요하게 학기 목록 등을 거치지 말고, 전용 개설 강의 조회 도구(`api_getCourseOfferings`)를 직접 호출하십시오. (파라미터: `year`=연도정수, `term`='FIRST'/'SECOND'/'SUMMER'/'WINTER', `deptName`=학과명, `keyword`=검색어)
-   - **교내 전화번호부 / 연락처**: `api_searchContacts` (교수명, 학과명, 부서명)
+   - **교내 전화번호부 / 교수·부서 연락처**: `api_searchDirectory` (교수명, 학과명, 부서명 검색). 만약 전화번호부에서 검색 결과가 없거나 실패할 경우, 포기하지 말고 반드시 전 도메인 고도화 통합 검색 도구(`api_unifiedSearch`)를 연속으로 호출하여 학교 웹페이지, 부서 안내, 공지사항에서 연락처와 위치를 적극적으로 탐색하십시오.
    - **학식 메뉴**: `api_getCafeteriaMenu` (식당명, 요일)
    - **학사일정 캘린더**: `api_getAcademicCalendar` (연도, 월)
    - **실시간 버스 도착**: `api_getBusArrivals` (정류소)

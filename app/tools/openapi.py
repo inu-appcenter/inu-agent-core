@@ -237,10 +237,14 @@ class OpenApiConnector:
     def _infer_category(self, path: str, tags: List[str]) -> str:
         p = path.lower()
         tag_str = " ".join(t.lower() for t in tags)
-
         tags_lower = [t.lower() for t in tags]
+
+        # Prioritize keyword/fcm/alarm notification endpoints first
+        if "/keyword" in p or "/fcm" in p or "/alarm" in p or "/notification" in p:
+            return "KEYWORD"
+
         # Prioritize specific subdomains first (e.g. /api/directory/search is DIRECTORY, not general SEARCH)
-        if "/directory" in p or "contact" in p or "/department" in p or any("directory" in t for t in tags_lower):
+        if "/directory" in p or "contact" in p or any("directory" in t for t in tags_lower):
             return "DIRECTORY"
         if "/cafeteria" in p or any("cafeteria" in t for t in tags_lower):
             return "CAFETERIA"
