@@ -204,7 +204,15 @@ class DrillDownEvaluator:
                     or data.get("noticeContent")
                     or ""
                 )
-                if not content_text and "평가비율" in str(data):
+                if isinstance(data, dict) and any(k in data for k in ["학습평가방법", "성적평가비율", "주별수업계획"]):
+                    eval_parts = []
+                    if data.get("과목명"): eval_parts.append(f"과목명: {data['과목명']}")
+                    if data.get("교수"): eval_parts.append(f"교수: {data['교수']}")
+                    if data.get("학습평가방법"): eval_parts.append(f"학습평가방법: {data['학습평가방법']}")
+                    if data.get("성적평가비율"): eval_parts.append(f"성적평가비율: {json.dumps(data['성적평가비율'], ensure_ascii=False)}")
+                    if data.get("주별수업계획"): eval_parts.append(f"주별수업계획: {json.dumps(data['주별수업계획'][:15], ensure_ascii=False)}")
+                    content_text = "\n".join(eval_parts)
+                elif not content_text and "평가비율" in str(data):
                     # Syllabus dictionary
                     content_text = str(data)
             elif isinstance(data, str):

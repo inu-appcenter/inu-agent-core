@@ -1353,6 +1353,7 @@ class AgentOrchestrator:
                         )
 
                 elif res is not None:
+                    tool_data = res
                     if tool.category == "BUS":
                         mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
                         bus_raw = res.get("rawData") if (isinstance(res, dict) and isinstance(res.get("rawData"), dict)) else {}
@@ -1944,10 +1945,11 @@ class AgentOrchestrator:
                             status_title = f"{tool_display_name} 확인 완료"
                             lines = [f"\n[교과목 강의계획서 상세 조회 결과 ({tool_display_name})]:"]
                             # Extract syllabus fields (e.g. 교과목명, 교수명, 평가비율, 주별계획)
-                            c_title = s_content.get("교과목명") or s_content.get("교과목") or s_content.get("과목명") or ""
-                            c_prof = s_content.get("담당교수") or s_content.get("교수명") or ""
-                            c_eval = s_content.get("평가비율") or s_content.get("평가방법") or s_content.get("성적평가") or ""
-                            c_weeks = s_content.get("주차별계획") or s_content.get("주별계획") or []
+                            c_title = s_content.get("과목명") or s_content.get("교과목명") or s_content.get("교과목") or ""
+                            c_prof = s_content.get("교수") or s_content.get("담당교수") or s_content.get("교수명") or ""
+                            c_eval = s_content.get("성적평가비율") or s_content.get("평가비율") or s_content.get("성적평가") or ""
+                            c_method = s_content.get("학습평가방법") or s_content.get("평가방법") or ""
+                            c_weeks = s_content.get("주별수업계획") or s_content.get("주차별계획") or s_content.get("주별계획") or []
                             c_books = s_content.get("교재") or s_content.get("교재및참고자료") or ""
 
                             if not c_title:
@@ -1959,17 +1961,18 @@ class AgentOrchestrator:
 
                             if c_title: lines.append(f"- **교과목명**: {c_title}")
                             if c_prof: lines.append(f"- **담당교수**: {c_prof}")
-                            if c_eval: lines.append(f"- **평가 비율**: {json.dumps(c_eval, ensure_ascii=False) if isinstance(c_eval, dict) else c_eval}")
+                            if c_eval: lines.append(f"- **성적 평가 비율**: {json.dumps(c_eval, ensure_ascii=False) if isinstance(c_eval, dict) else c_eval}")
+                            if c_method: lines.append(f"- **학습 평가 방법**: {c_method}")
                             if c_books: lines.append(f"- **교재 및 참고자료**: {json.dumps(c_books, ensure_ascii=False) if isinstance(c_books, (dict, list)) else c_books}")
                             if c_weeks and isinstance(c_weeks, list):
                                 lines.append("- **주차별 계획 요약**:")
-                                for w in c_weeks[:8]:
+                                for w in c_weeks[:15]:
                                     if isinstance(w, dict):
                                         w_num = w.get("주차") or w.get("주") or ""
                                         w_topic = w.get("내용") or w.get("강의내용") or w.get("주제") or ""
                                         lines.append(f"  • {w_num}주차: {w_topic}")
-                            lines.append(f"\n[강의계획서 전체 원문 데이터]:\n{json.dumps(s_content, ensure_ascii=False)[:1200]}")
-                            lines.append("💡 지침: 위 조회된 실제 강의계획서의 평가 비율과 주차별 수업 계획을 학생에게 친절하고 명확하게 안내하세요.")
+                            lines.append(f"\n[강의계획서 전체 원문 데이터]:\n{json.dumps(s_content, ensure_ascii=False)[:2000]}")
+                            lines.append("💡 지침: 위 조회된 실제 강의계획서의 평가 비율(중간고사, 기말고사, 출석, 과제 등)과 주차별 수업 계획을 학생에게 친절하고 명확하게 안내하세요.")
                             summary_out = "\n".join(lines) + "\n"
                         else:
                             courses = []
@@ -2074,7 +2077,7 @@ class AgentOrchestrator:
                     status_state=status_state,
                 ),
                 summary_out,
-                None,
+                ac_data_out,
                 None,
                 tool_data if tool.category in ["SEARCH", "NOTICE", "COURSE"] else None,
             )

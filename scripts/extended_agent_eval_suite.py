@@ -93,10 +93,10 @@ EXTENDED_TEST_SUITE: List[TestCase] = [
         name="과목 강의계획서 상세 조회 (실제 평가비율 및 주차별 계획 파싱 확인)",
         message="컴퓨터프로그래밍 강의계획서 평가 비율이나 주차별 계획 알려줘",
         expected_tool_keyword="course",
-        must_contain=["평가", "계획"],
-        must_not_contain=["일시적인 오류로 인해", "불러오지 못했습니다"],
+        must_contain=["출석", "과제"],
+        must_not_contain=["확인할 수 없습니다", "포함되어 있지 않", "일시적인 오류로 인해", "불러오지 못했습니다"],
         requires_auth=True,
-        notes="실제 DB에 존재하는 컴퓨터프로그래밍 강좌의 평가 비율과 주차별 계획을 파싱하는지 확인",
+        notes="실제 DB에 존재하는 컴퓨터프로그래밍 강좌의 평가 비율(출석 20%, 과제 20%, 시험 60%)과 주차별 계획을 실데이터 기반으로 파싱하는지 엄격히 확인",
     ),
     TestCase(
         id="SET_B_COURSE_01",
