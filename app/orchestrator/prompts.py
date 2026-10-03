@@ -136,7 +136,7 @@ def get_tool_orchestration_prompt(client: str) -> str:
    - **캠퍼스 실시간 날씨**: `api_getWeather`
    - **교내 동아리 목록 및 모집**: `api_getAllClubs` (동아리가 비어있으면 `api_unifiedSearch` 교차 조회)
    - **학내 분실물 습득/신고**: `api_getLostProperties` (결과 부재 시 `api_unifiedSearch` 교차 조회)
-   - **총학생회 공식 공지사항**: `api_getAllPost_3` (또는 `api_getCouncilNotices`)
+   - **총학생회 공식 공지사항**: `api_getCouncilNotices`
    - **학과별 공식 공지사항**: `api_getDepartmentNotices` (department 파라미터는 `COMPUTER_ENGINEERING` 등 영문 enum)
    - **등록금 납부 및 고지서**: `action_portal_get_tuition`
    - **장학금 수혜 내역**: `action_portal_get_scholarship`
@@ -207,6 +207,7 @@ def get_system_prompt_for_client(client: str, tool_summary: str = "") -> str:
 
 6. **[버스 도착 정보 안내 원칙]**:
    * 버스는 오직 **인팁(INTIP) 프론트엔드/인입런에서 공식 서비스하는 정류소 및 모니터링 노선**에 대해서만 응답하세요.
+   * 사용자가 문의한 위치나 정류장(예: 공과대학/공대, 자연대, 정문, 인천대입구역 등)의 명칭을 소제목이나 본문에 명확히 명시하여 안내하세요. (예: `### 🚌 버스 도착 정보 안내 (공과대학 / 공대·자연대 정류소)`)
    * [시스템 조회 데이터]에 없는 비서비스 광역/시내버스 노선(예: M6464, 일반 외부 광역버스 등)은 절대로 답변에 포함하거나 지어내지 마십시오.
    * [시스템 조회 데이터]에 서비스 대상 버스의 도착 정보(몇 분 후 도착, 몇 개 정류장 전)가 있으면 정류장 명칭과 함께 도착 예정 시간을 명확히 안내하세요.
    * 실시간 도착 데이터가 비어있거나 서비스 대상 버스가 운행 중이지 않은 경우, "현재 해당 정류장에 운행 대기 중이거나 도착 예정인 인팁 서비스 버스가 없습니다"라고 사실대로 안내하세요.

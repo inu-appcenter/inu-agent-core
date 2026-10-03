@@ -200,8 +200,10 @@ class OpenApiConnector:
                 tags = op.get("tags", [])
                 category = self._infer_category(path, tags)
 
-                # Skip internal or deprecated APIs
-                if any(x in path for x in ["/admin/", "/actuator/", "/error", "/agent/"]):
+                # Skip internal, deprecated, or non-functional legacy APIs
+                # Note: /api/search is a legacy broken endpoint (500 Internal Server Error).
+                # All search operations are officially served by /api/search/unified (unifiedSearch).
+                if any(x in path for x in ["/admin/", "/actuator/", "/error", "/agent/"]) or path == "/api/search":
                     continue
 
                 # Canonical naming and clean descriptions for high-traffic student life domains
