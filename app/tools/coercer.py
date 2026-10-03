@@ -3,6 +3,7 @@ Schema Coercer Module
 Generic, schema-driven parameter validation, type coercion, and semantic synonym resolution
 for MCP and native tools, eliminating brittle domain-specific hardcodings in the orchestrator.
 """
+import re
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 from app.core.logging import logger
@@ -116,9 +117,22 @@ class SchemaCoercer:
         kst_now = datetime.now(timezone(timedelta(hours=9)))
         if "year" in properties and (not coerced.get("year")):
             coerced["year"] = kst_now.year
-        if "term" in properties and (not coerced.get("term")):
-            curr_month = kst_now.month
-            coerced["term"] = "SECOND" if curr_month >= 7 else "FIRST"
+        if "term" in properties:
+            raw_term = coerced.get("term")
+            if raw_term is not None:
+                term_str = str(raw_term).strip().upper()
+                if term_str in ["1", "1학기", "FIRST", "1ST", "10"]:
+                    coerced["term"] = "FIRST"
+                elif term_str in ["2", "2학기", "SECOND", "2ND", "20"]:
+                    coerced["term"] = "SECOND"
+                elif term_str in ["SUMMER", "여름", "여름학기", "계절학기"]:
+                    coerced["term"] = "SUMMER"
+                elif term_str in ["WINTER", "겨울", "겨울학기"]:
+                    coerced["term"] = "WINTER"
+            else:
+                curr_month = kst_now.month
+                coerced["term"] = "SECOND" if curr_month >= 7 else "FIRST"
+
         if "month" in properties and (not coerced.get("month")):
             coerced["month"] = kst_now.month
         if "day" in properties and (not coerced.get("day")):
@@ -126,12 +140,27 @@ class SchemaCoercer:
 
         # Course offerings parameter resilience:
         # Normalize deptName aliases (e.g. 컴공 -> 컴퓨터공학부, 데사 -> 데이터과학과)
+        # And extract embedded grade (e.g. '컴퓨터공학부 2학년' -> deptName='컴퓨터공학부', hyNames=['2'])
         if "deptName" in properties and coerced.get("deptName"):
             raw_dept = str(coerced["deptName"]).strip()
+            
+            # Extract embedded grade from deptName if hyNames not already set
+            grade_match = re.search(r"([1-4])\s*학년", raw_dept)
+            if grade_match:
+                extracted_grade = grade_match.group(1)
+                raw_dept = re.sub(r"([1-4])\s*학년", "", raw_dept).strip()
+                if "hyNames" in properties and not coerced.get("hyNames"):
+                    coerced["hyNames"] = [extracted_grade]
+
             for canon_dept, aliases in KOREAN_DEPARTMENTS.items():
                 if raw_dept == canon_dept or raw_dept in aliases:
                     coerced["deptName"] = canon_dept
                     break
+                # Partial match fallback (e.g. raw_dept starts with canonical name)
+                elif raw_dept.startswith(canon_dept):
+                    coerced["deptName"] = canon_dept
+                    break
+
             # Guard against keyword duplication: if keyword was erroneously set to deptName, remove keyword
             # so the backend does not filter courseTitle by department name!
             if coerced.get("keyword") and (coerced["keyword"] == coerced["deptName"] or coerced["keyword"] in KOREAN_DEPARTMENTS.get(coerced["deptName"], [])):
