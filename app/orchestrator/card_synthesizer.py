@@ -54,6 +54,18 @@ class CardSynthesizer:
                 elif ui_type == "LMS_AUTH_REQUIRED":
                     return cls._build_lms_auth_card()
 
+            # Universal HTTP 401 Unauthorized handling across all tools
+            if data.get("status_code") == 401 or data.get("auth_required") or "401" in str(data.get("error", "")):
+                return ComponentCard(
+                    type="AUTH_REQUIRED",
+                    title="로그인이 필요한 서비스예요",
+                    data={"message": "해당 학사/강의 정보를 조회하려면 로그인이 필요합니다."},
+                    link=CardLink(
+                        label="로그인하기",
+                        route="/login",
+                    ),
+                )
+
         if domain == "BUS":
             return cls._build_bus_card(data)
         elif domain == "CAFETERIA":
