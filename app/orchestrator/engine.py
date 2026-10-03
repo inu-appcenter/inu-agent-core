@@ -118,8 +118,16 @@ class AgentOrchestrator:
 
         client_ctx = request.client_context or {}
         is_app = bool(client_ctx.get("isApp", False))
-        raw_token = client_ctx.get("auth") or client_ctx.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        raw_token = (
+            client_ctx.get("auth")
+            or client_ctx.get("authorization")
+            or client_ctx.get("accessToken")
+            or client_ctx.get("access_token")
+            or client_ctx.get("token")
+            or client_ctx.get("jwt")
+            or ""
+        )
+        clean_token = str(raw_token).replace("Bearer ", "").strip() if raw_token else ""
 
         portal_meta = client_ctx.get("portal") if isinstance(client_ctx.get("portal"), dict) else {}
         logger.info(
@@ -134,9 +142,11 @@ class AgentOrchestrator:
         exec_context = {
             "auth": clean_token,
             "authorization": f"Bearer {clean_token}" if clean_token else "",
+            "accessToken": clean_token,
             "client": request.client,
             "query": request.message,
         }
+
 
         # 2. Build initial conversation messages & OpenAI tool schemas
         openai_tools = [t.get_schema() for t in candidate_tools]

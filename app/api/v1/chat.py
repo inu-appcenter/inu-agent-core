@@ -22,14 +22,25 @@ async def chat_stream(
         request.client = x_appcenter_client.upper()
 
     raw_token = auth or authorization
+    if not raw_token and request.client_context:
+        raw_token = (
+            request.client_context.get("accessToken")
+            or request.client_context.get("access_token")
+            or request.client_context.get("auth")
+            or request.client_context.get("authorization")
+            or request.client_context.get("token")
+            or ""
+        )
     if raw_token:
         if request.client_context is None:
             request.client_context = {}
-        clean_token = raw_token.replace("Bearer ", "").strip()
+        clean_token = str(raw_token).replace("Bearer ", "").strip()
         request.client_context["auth"] = clean_token
         request.client_context["authorization"] = f"Bearer {clean_token}"
+        request.client_context["accessToken"] = clean_token
 
     logger.info(f"Incoming chat request: '{request.message[:30]}...' from client: {request.client} (Auth: {bool(raw_token)})")
+
 
     async def event_generator():
         try:
@@ -69,12 +80,23 @@ async def chat_action_callback(
         callback_req.client = x_appcenter_client.upper()
 
     raw_token = auth or authorization
+    if not raw_token and callback_req.client_context:
+        raw_token = (
+            callback_req.client_context.get("accessToken")
+            or callback_req.client_context.get("access_token")
+            or callback_req.client_context.get("auth")
+            or callback_req.client_context.get("authorization")
+            or callback_req.client_context.get("token")
+            or ""
+        )
     if raw_token:
         if callback_req.client_context is None:
             callback_req.client_context = {}
-        clean_token = raw_token.replace("Bearer ", "").strip()
+        clean_token = str(raw_token).replace("Bearer ", "").strip()
         callback_req.client_context["auth"] = clean_token
         callback_req.client_context["authorization"] = f"Bearer {clean_token}"
+        callback_req.client_context["accessToken"] = clean_token
+
 
     logger.info(
         f"Incoming action callback: action_id={callback_req.action_id} success={callback_req.success} "

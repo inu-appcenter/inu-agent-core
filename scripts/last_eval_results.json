@@ -1,0 +1,19 @@
+[
+  {
+    "id": "LV3_AUTH_COURSE_01",
+    "name": "개설강의 조회 (토큰 포함 정상 조회)",
+    "category": "Level 3: 인증 전용 (개설강의)",
+    "question": "2026년 2학기 컴퓨터공학부 개설강의 목록 보여줘",
+    "status_code": 200,
+    "duration": 9.5,
+    "events_count": 307,
+    "tokens_count": 180,
+    "cards_count": 0,
+    "actions_count": 0,
+    "success": true,
+    "failure_reasons": [],
+    "full_text_preview": "**현재 교내 시스템의 일시적인 오류로 인해 2026학년도 2학기 컴퓨터공학부의 개설 강의 목록을 불러오지 못했습니다.**\n\n> ⚠️ **안내 말씀**\n> 현재 `api_getCourseOfferings` 서비스 호...",
+    "cards_summary": [],
+    "thinking_preview": "사용\n자가\n \n2\n0\n2\n6\n년\n \n2\n학\n기\n 컴퓨터\n공\n학\n부\n의\n 개\n설\n 강의\n 목록\n을\n 요청\n했습니다\n.\n '\napi\n_\nget\nCourse\nOffer\nings\n'\n 도..."
+  }
+]

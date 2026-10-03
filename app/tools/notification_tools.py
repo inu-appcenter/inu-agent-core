@@ -17,7 +17,22 @@ from app.tools.base import BaseTool
 logger = logging.getLogger("inu-agent-core.tools.notification")
 
 
+def _extract_clean_token(context: Optional[Dict[str, Any]]) -> str:
+    if not context:
+        return ""
+    raw = (
+        context.get("auth")
+        or context.get("authorization")
+        or context.get("accessToken")
+        or context.get("access_token")
+        or context.get("token")
+        or ""
+    )
+    return str(raw).replace("Bearer ", "").strip() if raw else ""
+
+
 class ManageReminderTool(BaseTool):
+
     """
     맞춤 푸시 알림 예약 및 관리 도구 (ACTION_MANAGE_REMINDER)
     """
@@ -82,8 +97,8 @@ class ManageReminderTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        clean_token = _extract_clean_token(context)
+
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
@@ -172,8 +187,8 @@ class DailyBriefTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        clean_token = _extract_clean_token(context)
+
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
@@ -257,8 +272,8 @@ class NoticeKeywordTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        clean_token = _extract_clean_token(context)
+
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
@@ -321,8 +336,7 @@ class MySettingsTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        clean_token = _extract_clean_token(context)
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"

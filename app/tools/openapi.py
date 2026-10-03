@@ -71,11 +71,19 @@ class OpenApiTool(BaseTool):
             "Accept": "application/json",
             "User-Agent": "inu-agent-core/0.1.0",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        raw_token = (
+            context.get("auth")
+            or context.get("authorization")
+            or context.get("accessToken")
+            or context.get("access_token")
+            or context.get("token")
+            or ""
+        )
+        clean_token = str(raw_token).replace("Bearer ", "").strip() if raw_token else ""
         if clean_token:
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
+
 
         if settings.INU_INTERNAL_S2S_SECRET:
             headers["X-Internal-Secret"] = settings.INU_INTERNAL_S2S_SECRET

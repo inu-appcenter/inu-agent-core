@@ -63,10 +63,19 @@ class McpRemoteTool(BaseTool):
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
-        raw_token = context.get("auth") or context.get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        raw_token = (
+            context.get("auth")
+            or context.get("authorization")
+            or context.get("accessToken")
+            or context.get("access_token")
+            or context.get("token")
+            or ""
+        )
+        clean_token = str(raw_token).replace("Bearer ", "").strip() if raw_token else ""
         if clean_token:
+            headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
+
 
         logger.info(f"Executing McpRemoteTool [{self.name}] on {self.mcp_url} (Auth: {bool(clean_token)})")
 

@@ -79,8 +79,17 @@ class CampusWatchTool(BaseTool):
 
     async def execute(self, arguments: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         action = str(arguments.get("action") or "WATCH").upper().strip()
-        raw_token = (context or {}).get("auth") or (context or {}).get("authorization", "")
-        clean_token = raw_token.replace("Bearer ", "").strip() if raw_token else ""
+        raw_token = (
+
+            (context or {}).get("auth")
+            or (context or {}).get("authorization")
+            or (context or {}).get("accessToken")
+            or (context or {}).get("access_token")
+            or (context or {}).get("token")
+            or ""
+        )
+        clean_token = str(raw_token).replace("Bearer ", "").strip() if raw_token else ""
+
 
         headers = {}
         if clean_token:
