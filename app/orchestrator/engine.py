@@ -27,6 +27,8 @@ from app.orchestrator.router import AgentRouter
 from app.tools.base import BaseTool
 from app.tools.registry import tool_registry
 from app.tools.coercer import SchemaCoercer
+from app.orchestrator.drill_down import DrillDownEvaluator
+from app.orchestrator.slot_filler import SlotFillingValidator
 
 
 def resolve_tool_display_name(category: str, name: str) -> str:
@@ -564,7 +566,8 @@ class AgentOrchestrator:
                     continue
 
                 tool_obs = ""
-                async for event, summary, ac_data, rag_data in self._execute_tool(
+                last_tool_raw = None
+                async for res_tuple in self._execute_tool(
                     tool=target_tool,
                     tool_args=fn_args,
                     request=request,
@@ -573,6 +576,12 @@ class AgentOrchestrator:
                     emitted_actions=emitted_actions,
                     academic_context=academic_data_dict,
                 ):
+                    event = res_tuple[0]
+                    summary = res_tuple[1]
+                    ac_data = res_tuple[2]
+                    rag_data = res_tuple[3]
+                    raw_data = res_tuple[4] if len(res_tuple) > 4 else None
+
                     if event:
                         yield event
                         if getattr(event, "event_type", None) == "STATUS":
@@ -596,6 +605,8 @@ class AgentOrchestrator:
                         academic_data_dict.update(ac_data)
                     if rag_data:
                         inuchat_rag_data = rag_data
+                    if raw_data:
+                        last_tool_raw = raw_data
 
                 executed_categories.add(target_tool.category.upper())
                 executed_tool_names.add(target_tool.name)
@@ -604,6 +615,32 @@ class AgentOrchestrator:
                     q_val = fn_args.get("q", "")
                     if q_val:
                         successful_search_queries.add(q_val)
+
+                # Autonomous Parallel Deep Drill-Down Engine
+                if (
+                    target_tool.category in ["SEARCH", "NOTICE", "COURSE"]
+                    or "search" in target_tool.name.lower()
+                    or "notice" in target_tool.name.lower()
+                ) and DrillDownEvaluator.should_drill_down(request.message, target_tool.name, hop):
+                    raw_to_eval = last_tool_raw if last_tool_raw is not None else {}
+                    top_candidates = DrillDownEvaluator.extract_top_candidates(
+                        tool_name=target_tool.name,
+                        tool_category=target_tool.category,
+                        raw_data=raw_to_eval,
+                        max_k=3,
+                    )
+                    if top_candidates:
+                        logger.info(f"[DRILL_DOWN] Triggering parallel deep drill-down for {len(top_candidates)} candidates: {top_candidates}")
+                        candidate_titles = ", ".join(t[2] for t in top_candidates[:2])
+                        yield AgentStreamEvent(
+                            event_type="THINKING",
+                            thinking=f"검색 결과에서 확인된 주요 항목({candidate_titles} 등 {len(top_candidates)}건)의 세부 본문 및 신청 기준을 심층 확인하기 위해 세부 정보를 병렬 조회합니다.",
+                        )
+                        detail_docs = await DrillDownEvaluator.fetch_details_in_parallel(top_candidates, exec_context)
+                        if detail_docs:
+                            drill_summary = DrillDownEvaluator.format_drill_down_summary(detail_docs)
+                            tool_summary_text += drill_summary
+                            tool_obs += drill_summary
 
                 if not tool_obs:
                     tool_obs = json.dumps(
@@ -824,6 +861,36 @@ class AgentOrchestrator:
 
 
         logger.info(f"[TOOL_EXEC_START] tool={tool.name} category={tool.category} args={tool_args}")
+
+        # Slot-Filling Interception: Detect missing mandatory parameters for action/mutation intents
+        needs_intercept, missing_slots, clarif_prompt = SlotFillingValidator.should_intercept_action(
+            tool_name=tool.name,
+            tool_category=tool.category,
+            args=tool_args or {}
+        )
+        if needs_intercept:
+            logger.info(f"[SLOT_FILLER] Intercepted {tool.name} due to missing slots: {missing_slots}")
+            chips, clarif_card = await SlotFillingValidator.prefetch_options_for_clarification(
+                tool_name=tool.name,
+                exec_context=exec_context
+            )
+            clarif_text = f"\n[입력 정보 확인 요청 ({tool_display_name})]:\n{clarif_prompt}\n"
+            if chips:
+                clarif_text += f"- 추천 선택지: {', '.join(chips)}\n"
+            clarif_text += "💡 지침: 사용자에게 필요한 정보(시간, 방 번호 등)를 친절히 물어보고, 선택할 수 있는 보기나 양식을 안내하세요.\n"
+            yield (
+                AgentStreamEvent(
+                    event_type="STATUS",
+                    status_id=tool_id,
+                    status_title=f"{tool_display_name} 추가 정보 확인 필요",
+                    status_category=tool.category,
+                    status_state="completed",
+                ),
+                clarif_text,
+                None,
+                None,
+            )
+            return
 
         # Case A: Client Action (LMS, Portal ERP)
         if tool.category in ["LMS", "PORTAL"]:
@@ -2009,6 +2076,7 @@ class AgentOrchestrator:
                 summary_out,
                 None,
                 None,
+                tool_data if tool.category in ["SEARCH", "NOTICE", "COURSE"] else None,
             )
 
         # Case C: INUChat Official Knowledge RAG Tool
