@@ -128,14 +128,23 @@ def get_tool_orchestration_prompt(client: str) -> str:
    - 실패하거나 비어있는 도구는 그 사실을 명시하되, 사용자가 함께 질문한 나머지 영역에 대해서는 끝까지 도구를 호출하여 정상적으로 결과를 가져와 답변을 완성하십시오.
 
 8. **도메인별 최적 도구 직접 선택 가이드 (Direct Tool Selection Guide)**:
-   - **개설 강의 / 수강편람 / 강의 목록 조회**: 학기별, 학과별 개설 과목이나 특정 강의 검색 시에는 불필요하게 학기 목록 등을 거치지 말고, 전용 개설 강의 조회 도구(`api_getCourseOfferings`)를 직접 호출하십시오. (파라미터: `year`=연도정수, `term`='FIRST'/'SECOND'/'SUMMER'/'WINTER', `deptName`=학과명, `keyword`=검색어)
-   - **교내 전화번호부 / 교수·부서 연락처**: `api_searchDirectory` (교수명, 학과명, 부서명 검색). 만약 전화번호부에서 검색 결과가 없거나 실패할 경우, 포기하지 말고 반드시 전 도메인 고도화 통합 검색 도구(`api_unifiedSearch`)를 연속으로 호출하여 학교 웹페이지, 부서 안내, 공지사항에서 연락처와 위치를 적극적으로 탐색하십시오.
+   - **개설 강의 / 수강편람 / 강의 목록 조회**: 전용 개설 강의 조회 도구(`api_getCourseOfferings`)를 직접 호출하십시오. (파라미터: `year`=연도정수, `term`='FIRST'/'SECOND'/'SUMMER'/'WINTER', `deptName`=학과명, `keyword`=검색어)
+   - **교과목 강의계획서**: `api_getSyllabus` (또는 통합검색 `api_unifiedSearch` tab='COURSE')
+   - **교내 전화번호부 / 교수·부서 연락처**: `api_searchDirectory` (교수명, 학과명, 부서명 검색). 검색 결과가 없거나 실패할 경우, 포기하지 말고 전 도메인 고도화 통합 검색 도구(`api_unifiedSearch`)를 연속으로 호출하십시오.
    - **학식 메뉴**: `api_getCafeteriaMenu` (식당명, 요일)
-   - **학사일정 캘린더**: `api_getAcademicCalendar` (연도, 월)
    - **실시간 버스 도착**: `api_getBusArrivals` (정류소)
    - **캠퍼스 실시간 날씨**: `api_getWeather`
+   - **교내 동아리 목록 및 모집**: `api_getAllClubs` (동아리가 비어있으면 `api_unifiedSearch` 교차 조회)
+   - **학내 분실물 습득/신고**: `api_getLostProperties` (결과 부재 시 `api_unifiedSearch` 교차 조회)
+   - **총학생회 공식 공지사항**: `api_getCouncilNotices`
+   - **학과별 공식 공지사항**: `api_getDepartmentNotices` (department 파라미터는 `COMPUTER_ENGINEERING` 등 영문 enum)
+   - **등록금 납부 및 고지서**: `action_portal_get_tuition`
+   - **장학금 수혜 내역**: `action_portal_get_scholarship`
+   - **이러닝(LMS) 과제 및 마감 기한**: `action_lms_get_upcoming_assignments`
+   - **맞춤 알림(리마인더) 등록/관리**: `action_manage_reminder`
+   - **내 맞춤 알림 및 데일리 브리프 설정 종합**: `action_my_settings`
    - **학칙 / 규정 / 졸업 요건**: `inuai_knowledge_search`
-
+   - **학사일정 캘린더**: `api_getScheduleByMonth` (연도, 월)
 """
 
 

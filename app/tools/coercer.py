@@ -27,6 +27,22 @@ CAMPUS_SYNONYMS: Dict[str, list[str]] = {
     "SECOND": ["2학기", "2", "second", "SECOND", "20", "2학기수업", "2nd"],
     "SUMMER": ["여름학기", "여름계절학기", "계절학기", "summer", "30"],
     "WINTER": ["겨울학기", "겨울계절학기", "winter", "40"],
+    # Academic Departments (OpenAPI Enum)
+    "COMPUTER_ENGINEERING": ["컴퓨터공학부", "컴퓨터공학과", "컴공", "컴퓨터공학", "컴퓨터", "computer_engineering"],
+    "INFORMATION_COMMUNICATION_ENGINEERING": ["정보통신공학과", "정통", "정보통신", "정통과"],
+    "EMBEDDED_SYSTEM": ["임베디드시스템공학과", "임베디드", "임베"],
+    "BUSINESS_ADMINISTRATION": ["경영학부", "경영학과", "경영"],
+    "ECONOMICS": ["경제학과", "경제학부", "경제"],
+    "DATA_SCIENCE": ["데이터사이언스학과", "데이터사이언스", "데사"],
+    "SAFETY_ENGINEERING": ["안전공학과", "안전공학부", "안전"],
+    "MECHANICAL_ENGINEERING": ["기계공학과", "기계공학부", "기계"],
+    "ELECTRICAL_ENGINEERING": ["전기공학과", "전기공학부", "전기"],
+    "ELECTRONICS_ENGINEERING": ["전자공학과", "전자공학부", "전자"],
+    "MEDIA_COMMUNICATION": ["미디어커뮤니케이션학과", "미디어커뮤니케이션", "미컴"],
+    "SOCIAL_WELFARE": ["사회복지학과", "사회복지", "사복"],
+    "FASHION": ["패션산업학과", "패션산업", "패디"],
+    "LIFE_SCIENCE": ["생명과학부", "생명과학과", "생과"],
+    "BIOENGINEERING": ["생명공학부", "생명공학과", "생공"],
 }
 
 

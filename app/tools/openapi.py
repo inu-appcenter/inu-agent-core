@@ -204,13 +204,53 @@ class OpenApiConnector:
                 if any(x in path for x in ["/admin/", "/actuator/", "/error", "/agent/"]):
                     continue
 
-                tool_name = self._sanitize_tool_name(op_id, path)
+                # Canonical naming and clean descriptions for high-traffic student life domains
+                clean_summary = summary
+                if "\ufffd" in summary or not summary.strip():
+                    if path == "/api/lost":
+                        tool_name = "api_getLostProperties"
+                        clean_summary = "학내 분실물 습득/신고 목록 조회"
+                    elif path == "/api/lost/{lostId}":
+                        tool_name = "api_getLostPropertyDetail"
+                        clean_summary = "학내 분실물 상세 정보 조회"
+                    elif path == "/api/clubs":
+                        tool_name = "api_getAllClubs"
+                        clean_summary = "교내 동아리 목록 및 분과별 동아리 정보 조회"
+                    elif path == "/api/clubs/{clubId}":
+                        tool_name = "api_getClubDetail"
+                        clean_summary = "동아리 상세 정보 및 모집 요강 조회"
+                    elif path == "/api/councilNotices":
+                        tool_name = "api_getCouncilNotices"
+                        clean_summary = "총학생회 공식 공지사항 목록 조회"
+                    elif path == "/api/councilNotices/{councilNoticeId}":
+                        tool_name = "api_getCouncilNoticeDetail"
+                        clean_summary = "총학생회 공지사항 상세 내용 조회"
+                    elif path == "/api/notices/department":
+                        tool_name = "api_getDepartmentNotices"
+                        clean_summary = "단과대/학과별 공식 공지사항 목록 조회"
+                    elif path == "/api/syllabus":
+                        tool_name = "api_getSyllabus"
+                        clean_summary = "교과목 강의계획서 (수업 개요, 주차별 계획, 평가 비율) 조회"
+                    elif path == "/api/course-offerings":
+                        tool_name = "api_getCourseOfferings"
+                        clean_summary = "학기별/학과별 개설 강의 목록 및 수업 정보 조회"
+                    elif path == "/api/grades/all":
+                        tool_name = "api_getAllGradeRecord"
+                        clean_summary = "학생 본인의 전체 학기 취득 성적 및 평점 조회"
+                    elif path == "/api/grades":
+                        tool_name = "api_getGradeRecord"
+                        clean_summary = "특정 학기 성적 상세 조회"
+                    else:
+                        tool_name = self._sanitize_tool_name(op_id, path)
+                else:
+                    tool_name = self._sanitize_tool_name(op_id, path)
+
                 params_schema = self._build_params_schema(op.get("parameters", []))
                 requires_auth = self._check_auth_required(op, root_security=root_security)
 
                 tool = OpenApiTool(
                     name=tool_name,
-                    description=summary,
+                    description=clean_summary,
                     method=method,
                     path=path,
                     parameters_schema=params_schema,
@@ -236,14 +276,13 @@ class OpenApiConnector:
 
     def _infer_category(self, path: str, tags: List[str]) -> str:
         p = path.lower()
-        tag_str = " ".join(t.lower() for t in tags)
         tags_lower = [t.lower() for t in tags]
 
         # Prioritize keyword/fcm/alarm notification endpoints first
         if "/keyword" in p or "/fcm" in p or "/alarm" in p or "/notification" in p:
             return "KEYWORD"
 
-        # Prioritize specific subdomains first (e.g. /api/directory/search is DIRECTORY, not general SEARCH)
+        # Prioritize specific subdomains first
         if "/directory" in p or "contact" in p or any("directory" in t for t in tags_lower):
             return "DIRECTORY"
         if "/cafeteria" in p or any("cafeteria" in t for t in tags_lower):
@@ -262,6 +301,8 @@ class OpenApiConnector:
             return "RESERVATION"
         if "/weather" in p or any("weather" in t for t in tags_lower):
             return "WEATHER"
+        if "/grade" in p or any("grade" in t for t in tags_lower):
+            return "PORTAL"
         if "/course" in p or any("course" in t for t in tags_lower):
             return "COURSE"
         if "/club" in p or any("club" in t for t in tags_lower):

@@ -58,19 +58,54 @@ class ToolRegistry:
                 if "search" in t_name.lower():
                     return t
         elif "club" in clean_name:
-            for preferred in ["api_getClubs", "api_club", "getClubs"]:
+            for preferred in ["api_getAllClubs", "getAllClubs", "api_getClubs", "api_club", "getClubs"]:
                 if preferred in self._tools:
                     return self._tools[preferred]
             for t_name, t in self._tools.items():
                 if "club" in t_name.lower():
                     return t
         elif "lost" in clean_name:
-            for preferred in ["api_getLostProperties", "api_lostProperty", "getLostProperties"]:
+            for preferred in ["api_getLostProperties", "api_getList_1", "getLostProperties", "api_lostProperty"]:
                 if preferred in self._tools:
                     return self._tools[preferred]
             for t_name, t in self._tools.items():
                 if "lost" in t_name.lower():
                     return t
+        elif "syllabus" in clean_name:
+            for preferred in ["api_getSyllabus", "getSyllabus"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "syllabus" in t_name.lower():
+                    return t
+        elif "tuition" in clean_name:
+            for preferred in ["action_portal_get_tuition", "PORTAL_GET_TUITION"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "scholarship" in clean_name:
+            for preferred in ["action_portal_get_scholarship", "PORTAL_GET_SCHOLARSHIP"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "assignment" in clean_name:
+            for preferred in ["action_lms_get_upcoming_assignments", "LMS_GET_UPCOMING_ASSIGNMENTS"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "reminder" in clean_name:
+            for preferred in ["action_manage_reminder", "manage_reminder"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "setting" in clean_name:
+            for preferred in ["action_my_settings", "my_settings", "action_daily_brief"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "council" in clean_name:
+            for preferred in ["api_getCouncilNotices", "api_getAllPost_3", "api_getCouncilNotice_1"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+        elif "department" in clean_name and "notice" in clean_name:
+            for preferred in ["api_getDepartmentNotices", "getDepartmentNotices"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
 
         # 3. Fallback to category match only if no name matched
         for t_name, t in self._tools.items():

@@ -107,15 +107,40 @@ class AgentOrchestrator:
         core_categories = [
             "SEARCH", "PORTAL", "LMS", "DIRECTORY", "INU_AI_KNOWLEDGE", "LIBRARY",
             "CAFETERIA", "BUS", "TIMETABLE", "CAMPUS_WATCH", "NOTICE", "SCHEDULE",
-            "COURSE", "WEATHER"
+            "COURSE", "WEATHER", "CLUB", "LOST_PROPERTY"
         ]
         existing_cats = {t.category.upper() for t in candidate_tools}
+        existing_tool_names = {t.name for t in candidate_tools}
+
         for cat in core_categories:
             if cat not in existing_cats:
                 cat_tools = tool_registry.get_tools_by_category(cat)
                 if cat_tools:
                     candidate_tools.append(cat_tools[0])
                     existing_cats.add(cat)
+                    existing_tool_names.add(cat_tools[0].name)
+
+        # Dynamic Intent-driven Tool Injections to guarantee critical domain tools are never starved
+        q_lower = request.message.lower()
+        intent_tool_map = {
+            ("등록금", "고지서", "납부", "tuition"): "action_portal_get_tuition",
+            ("장학금", "장학", "scholarship"): "action_portal_get_scholarship",
+            ("과제", "이러닝", "lms", "마감", "assignment"): "action_lms_get_upcoming_assignments",
+            ("강의계획서", "실라버스", "수업계획", "syllabus"): "api_getSyllabus",
+            ("동아리", "소모임", "club"): "api_getAllClubs",
+            ("분실물", "분실", "습득", "lost"): "api_getLostProperties",
+            ("총학생회", "총학", "council"): "api_getCouncilNotices",
+            ("학과 공지", "과 공지", "학부 공지", "department notice"): "api_getDepartmentNotices",
+            ("리마인더", "알림 등록", "매일 아침", "reminder"): "action_manage_reminder",
+            ("맞춤 알림", "내 설정", "데일리 브리프 설정", "settings"): "action_my_settings",
+            ("성적", "평점", "gpa", "취득학점", "성적표"): "action_portal_get_grade_report",
+        }
+        for keywords, tool_alias in intent_tool_map.items():
+            if any(kw in q_lower for kw in keywords):
+                target_t = tool_registry.get_tool(tool_alias)
+                if target_t and target_t.name not in existing_tool_names:
+                    candidate_tools.append(target_t)
+                    existing_tool_names.add(target_t.name)
 
         client_ctx = request.client_context or {}
         is_app = bool(client_ctx.get("isApp", False))
