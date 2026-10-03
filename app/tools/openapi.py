@@ -219,24 +219,27 @@ class OpenApiConnector:
 
     def _infer_category(self, path: str, tags: List[str]) -> str:
         p = path.lower()
-        if "/search" in p:
-            return "SEARCH"
-        if "/cafeteria" in p:
-            return "CAFETERIA"
-        if "/bus" in p or "buses" in p or "shuttle" in p:
-            return "BUS"
-        if "/timetable" in p or "syllabus" in p:
-            return "TIMETABLE"
-        if "/notice" in p or "councilnotice" in p:
-            return "NOTICE"
-        if "/schedule" in p or "/calendar" in p or "/semester" in p:
-            return "SCHEDULE"
-        if "/reservation" in p:
-            return "RESERVATION"
-        if "/weather" in p:
-            return "WEATHER"
-        if "/directory" in p or "contact" in p or "/department" in p:
+        tag_str = " ".join(t.lower() for t in tags)
+
+        # Prioritize specific subdomains first (e.g. /api/directory/search is DIRECTORY, not general SEARCH)
+        if "/directory" in p or "contact" in p or "/department" in p or "directory" in tag_str:
             return "DIRECTORY"
+        if "/cafeteria" in p or "cafeteria" in tag_str:
+            return "CAFETERIA"
+        if "/bus" in p or "buses" in p or "shuttle" in p or "bus" in tag_str:
+            return "BUS"
+        if "/timetable" in p or "syllabus" in p or "timetable" in tag_str:
+            return "TIMETABLE"
+        if "/notice" in p or "councilnotice" in p or "notice" in tag_str:
+            return "NOTICE"
+        if "/schedule" in p or "/calendar" in p or "/semester" in p or "schedule" in tag_str:
+            return "SCHEDULE"
+        if "/reservation" in p or "reservation" in tag_str:
+            return "RESERVATION"
+        if "/weather" in p or "weather" in tag_str:
+            return "WEATHER"
+        if "/search" in p or "search" in tag_str:
+            return "SEARCH"
         return "INTIP"
 
     def _check_auth_required(self, op: Dict[str, Any]) -> bool:
