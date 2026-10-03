@@ -37,6 +37,8 @@ class TestCase:
         message: str,
         expected_tool_keyword: Optional[str] = None,
         expected_card_type: Optional[str] = None,
+        must_contain: Optional[List[str]] = None,
+        must_not_contain: Optional[List[str]] = None,
         requires_auth: bool = False,
         client: str = "INTIP",
         history: Optional[List[Dict[str, Any]]] = None,
@@ -49,6 +51,8 @@ class TestCase:
         self.message = message
         self.expected_tool_keyword = expected_tool_keyword
         self.expected_card_type = expected_card_type
+        self.must_contain = must_contain or []
+        self.must_not_contain = must_not_contain or []
         self.requires_auth = requires_auth
         self.client = client
         self.history = history or []
@@ -63,18 +67,22 @@ EXTENDED_TEST_SUITE: List[TestCase] = [
     TestCase(
         id="SET_A_CLUB_01",
         category="Set A: 동아리 및 분실물",
-        name="교내 동아리 목록 조회 (DB 빈 목록 시 통합검색 Fallback 확인)",
+        name="교내 동아리 목록 조회 (DB 빈 목록 시 정직한 안내 확인)",
         message="교내 밴드 동아리나 음악 동아리 목록 찾아줘",
         expected_tool_keyword="club",
-        notes="동아리 API 실행 후 DB 결과가 없더라도 통합검색 연쇄로 포기하지 않는지 검증",
+        must_contain=["동아리", "없습니다"],
+        must_not_contain=["API error", "일시적인 오류로 인해"],
+        notes="동아리 API 실행 후 DB 결과가 없더라도 오류 핑계 없이 정직하게 안내하는지 검증",
     ),
     TestCase(
         id="SET_A_LOST_01",
         category="Set A: 동아리 및 분실물",
-        name="학내 분실물 습득/신고 목록 조회",
+        name="학내 분실물 습득/신고 목록 조회 (DB 빈 목록 시 정직한 안내)",
         message="학내 분실물 센터에 최근 등록된 물건 있어?",
         expected_tool_keyword="lost",
-        notes="분실물 API 또는 통합검색 연쇄 확인",
+        must_contain=["분실물", "없습니다"],
+        must_not_contain=["API error", "일시적인 오류로 인해", "서버 응답 지연"],
+        notes="분실물 API 실행 후 빈 목록일 때 오류 핑계 없이 사실대로 고지하는지 확인",
     ),
     # -------------------------------------------------------------
     # Set B: 강의계획서 및 수강편람 상세 (Syllabus & Course Catalog)
@@ -82,19 +90,24 @@ EXTENDED_TEST_SUITE: List[TestCase] = [
     TestCase(
         id="SET_B_SYLLABUS_01",
         category="Set B: 강의계획서/수강편람",
-        name="과목 강의계획서 조회",
-        message="컴퓨터네트워크 강의계획서 평가 비율이나 주차별 계획 알려줘",
-        expected_tool_keyword="syllabus",
+        name="과목 강의계획서 상세 조회 (실제 평가비율 및 주차별 계획 파싱 확인)",
+        message="컴퓨터프로그래밍 강의계획서 평가 비율이나 주차별 계획 알려줘",
+        expected_tool_keyword="course",
+        must_contain=["평가", "계획"],
+        must_not_contain=["일시적인 오류로 인해", "불러오지 못했습니다"],
         requires_auth=True,
-        notes="강의계획서 도구(api_syllabus / action_portal_download_syllabus / 통합검색) 확인",
+        notes="실제 DB에 존재하는 컴퓨터프로그래밍 강좌의 평가 비율과 주차별 계획을 파싱하는지 확인",
     ),
     TestCase(
         id="SET_B_COURSE_01",
         category="Set B: 강의계획서/수강편람",
-        name="개설강의 검색 (인증 전용)",
-        message="2026년 2학기 데이터사이언스 전공 개설강의 찾아줘",
+        name="개설강의 검색 (실제 DB 데이터사이언스 개설과목 파싱 확인)",
+        message="2026년 2학기 데이터사이언스 개설강의 목록 알려줘",
         expected_tool_keyword="course",
+        must_contain=["데이터사이언스"],
+        must_not_contain=["일시적인 오류로 인해", "불러오지 못했습니다", "API error"],
         requires_auth=True,
+        notes="실제 5건 존재하는 데이터사이언스 개설 과목을 400 에러 없이 정상 반환하는지 검증",
     ),
     # -------------------------------------------------------------
     # Set C: 학과 공지 및 총학생회 공지 (Department & Council Notices)
@@ -102,19 +115,23 @@ EXTENDED_TEST_SUITE: List[TestCase] = [
     TestCase(
         id="SET_C_DEPT_NOTICE_01",
         category="Set C: 공지사항 확장",
-        name="컴퓨터공학부 학과 공지사항 최신 글 조회",
+        name="컴퓨터공학부 학과 공지사항 최신 글 조회 (실제 31건 중 공지글 파싱 확인)",
         message="컴퓨터공학부 학과 공지사항 최신 글 목록 보여줘",
         expected_tool_keyword="department",
         expected_card_type="NOTICE_LIST",
-        notes="department enum 매핑(COMPUTER_ENGINEERING) 및 학과 공지 조회 확인",
+        must_contain=["컴퓨터공학", "공지"],
+        must_not_contain=["일시적인 오류로 인해", "불러오지 못했습니다"],
+        notes="실제 존재하는 컴퓨터공학부 공지사항 목록을 오류 없이 정상 파싱하는지 확인",
     ),
     TestCase(
         id="SET_C_COUNCIL_NOTICE_01",
         category="Set C: 공지사항 확장",
-        name="총학생회 공지사항 조회",
+        name="총학생회 공지사항 조회 (DB 0건 시 정직한 안내 확인)",
         message="총학생회 최근 공지사항 올라온 거 있어?",
         expected_tool_keyword="council",
-        notes="총학생회 공지 도구 실행 및 통합검색 연쇄 확인",
+        must_contain=["총학생회", "없습니다"],
+        must_not_contain=["일시적인 오류로 인해", "API error", "서버 응답 지연"],
+        notes="DB에 0건일 때 서버 오류 핑계 없이 정직하게 안내하는지 확인",
     ),
     # -------------------------------------------------------------
     # Set D: 학적 P2P 액션 확장 (Tuition, Scholarship, LMS)
@@ -122,7 +139,7 @@ EXTENDED_TEST_SUITE: List[TestCase] = [
     TestCase(
         id="SET_D_TUITION_01",
         category="Set D: 학적 P2P 액션",
-        name="등록금 납부 고지서 조회 (Client Action)",
+        name="등록금 납부 고지서 조회 (Client Action 디스패치)",
         message="이번 학기 등록금 고지서 얼마 나왔어?",
         expected_tool_keyword="tuition",
         requires_auth=True,
@@ -131,7 +148,7 @@ EXTENDED_TEST_SUITE: List[TestCase] = [
     TestCase(
         id="SET_D_SCHOLARSHIP_01",
         category="Set D: 학적 P2P 액션",
-        name="장학금 수혜 내역 조회 (Client Action)",
+        name="장학금 수혜 내역 조회 (Client Action 디스패치)",
         message="나 지금까지 받은 장학금 수혜 내역 조회해줘",
         expected_tool_keyword="scholarship",
         requires_auth=True,
@@ -184,7 +201,8 @@ EXTENDED_TEST_SUITE: List[TestCase] = [
         name="복합 다중 의도 질의 (학생식당 학식 + 정문 버스 도착)",
         message="오늘 학생식당 학식 메뉴랑 공과대학 버스 언제 오는지 둘 다 알려줘",
         expected_tool_keyword="cafeteria",
-        notes="학식과 버스 도구가 복합 실행되거나 최소 학식과 버스 모두 답변에 포함되는지 검증",
+        must_contain=["학생식당", "공과대학"],
+        notes="학식과 버스 도구가 복합 실행되고 둘 다 답변에 포함되는지 검증",
     ),
 ]
 
@@ -328,6 +346,20 @@ class ExtendedEvaluator:
             if tc.expected_card_type not in cards_received:
                 # Soft check - card is optional if detailed text is provided
                 pass
+
+        # Ground Truth Verification: Verify required content is present in answer
+        if tc.must_contain:
+            for kw in tc.must_contain:
+                if kw not in full_text:
+                    passed = False
+                    failure_reasons.append(f"Ground Truth Missing: Answer must contain '{kw}'")
+
+        # False Error Excuse Check: Verify agent didn't falsely blame server error
+        if tc.must_not_contain:
+            for kw in tc.must_not_contain:
+                if kw in full_text:
+                    passed = False
+                    failure_reasons.append(f"Unacceptable Error Excuse: Answer contained forbidden '{kw}'")
 
         # Zero Surrender Check: Check if agent gave up with "결과가 없습니다" without searching
         surrender_phrases = ["결과를 찾을 수 없습니다", "전화번호부 검색 실패", "검색 결과가 없습니다", "정보가 없습니다"]

@@ -273,13 +273,17 @@ class AgentOrchestrator:
                 )
 
             if not tool_calls:
-                # Deterministic Multi-Hop: 지도교수 연락처 질의 시 학적 조회 후 api_directory 미실행 상태면 자동 연쇄 호출
+                # Deterministic Multi-Hop 1: 지도교수 연락처 질의 시 학적 조회 후 api_directory 미실행 상태면 자동 연쇄 호출
                 is_contact_query = any(kw in request.message for kw in ["연락처", "전화번호", "전화", "연구실", "번호", "이메일", "메일", "교수님", "교수", "담임교수", "지도교수", "과사", "사무실", "찾아줘"])
                 advisor_name = academic_data_dict.get("advisor") or academic_data_dict.get("advisorProfessorName")
                 if not advisor_name and request.client_context:
                     acad_disp = request.client_context.get("academicDisplay")
                     if isinstance(acad_disp, dict):
                         advisor_name = acad_disp.get("advisorProfessorName") or acad_disp.get("profNm")
+
+                # Deterministic Multi-Hop 2: 강의계획서 질의 시 개설강좌 ID 확보 후 api_getSyllabus 미실행 상태면 자동 연쇄 호출
+                is_syllabus_query = any(kw in request.message for kw in ["강의계획서", "실라버스", "수업계획", "주차별", "평가비율", "평가 비율", "수업 계획", "교재"])
+                target_cid = academic_data_dict.get("courseOfferingId")
 
                 if is_contact_query and advisor_name and "DIRECTORY" not in executed_categories and "api_directory" not in executed_tool_names:
                     logger.info(f"Deterministic Multi-Hop: Chaining to api_directory for advisor '{advisor_name}'")
@@ -296,6 +300,23 @@ class AgentOrchestrator:
                             "function": {
                                 "name": "api_directory",
                                 "arguments": {"query": advisor_name},
+                            }
+                        }]
+                elif is_syllabus_query and target_cid and "api_getSyllabus" not in executed_tool_names:
+                    s_tool = tool_registry.get_tool("api_getSyllabus")
+                    if s_tool:
+                        logger.info(f"Deterministic Multi-Hop: Chaining to api_getSyllabus for courseOfferingId '{target_cid}'")
+                        yield AgentStreamEvent(
+                            event_type="THINKING",
+                            thinking=f"개설 강의 정보에서 확인된 교과목(강좌 ID: {target_cid})의 상세 강의계획서(평가 비율, 주차별 계획)를 조회하기 위해 {s_tool.name}을 호출합니다.",
+                        )
+                        from uuid import uuid4
+                        tool_calls = [{
+                            "id": f"call_auto_syllabus_{uuid4().hex[:6]}",
+                            "type": "function",
+                            "function": {
+                                "name": s_tool.name,
+                                "arguments": {"courseOfferingId": int(target_cid)},
                             }
                         }]
                 elif "SEARCH" in failed_tool_categories and "NOTICE" not in executed_categories and "api_notice" not in executed_tool_names:
@@ -1847,53 +1868,99 @@ class AgentOrchestrator:
                             summary_out = f"\n[공강 시간 분석 결과]:\n{mcp_summary}\n"
                     elif tool.category == "COURSE":
                         tool_data = res
-                        courses = []
-                        if isinstance(res, list):
-                            courses = res
-                        elif isinstance(res, dict):
-                            courses = (
-                                res.get("rawData")
-                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
-                                or res.get("contents")
-                                or res.get("items")
-                                or (res.get("content") if isinstance(res.get("content"), list) else [])
-                                or []
-                            )
-                        if isinstance(courses, dict):
-                            courses = [courses]
+                        is_syllabus = "syllabus" in tool.name.lower() or "courseofferingid" in str(final_args).lower()
+                        s_content = res.get("content") if isinstance(res, dict) else None
 
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        lines = [f"\n[인천대학교 개설 강의/수업 조회 결과 ({tool_display_name})]:"]
-                        is_empty_course = False
-                        if not courses and not mcp_summary:
-                            is_empty_course = True
-                        elif mcp_summary and any(kw in mcp_summary for kw in ["없습니다", "찾지 못했습니다", "0건", "없음"]) and not courses:
-                            is_empty_course = True
-
-                        if not is_empty_course:
+                        if is_syllabus and isinstance(s_content, dict) and s_content:
                             status_state = "completed"
                             status_title = f"{tool_display_name} 확인 완료"
-                            if courses:
-                                for c in courses[:6]:
-                                    if isinstance(c, dict):
-                                        c_name = c.get("courseName") or c.get("subject") or c.get("title") or "강의"
-                                        prof = c.get("professor") or c.get("prof") or ""
-                                        room = c.get("timeRoom") or c.get("classroom") or ""
-                                        credit = c.get("credit") or c.get("credits") or ""
-                                        details = []
-                                        if prof: details.append(f"교수: {prof}")
-                                        if room: details.append(f"강의실/시간: {room}")
-                                        if credit: details.append(f"{credit}학점")
-                                        det_str = f" ({', '.join(details)})" if details else ""
-                                        lines.append(f"- **{c_name}**{det_str}")
-                            elif mcp_summary:
-                                lines.append(mcp_summary)
-                            lines.append("💡 지침: 위 개설 강의 목록을 사용자에게 친절하고 명확하게 안내하세요. 가상의 과목이나 강의실을 지어내지 마세요.")
+                            lines = [f"\n[교과목 강의계획서 상세 조회 결과 ({tool_display_name})]:"]
+                            # Extract syllabus fields (e.g. 교과목명, 교수명, 평가비율, 주별계획)
+                            c_title = s_content.get("교과목명") or s_content.get("교과목") or s_content.get("과목명") or ""
+                            c_prof = s_content.get("담당교수") or s_content.get("교수명") or ""
+                            c_eval = s_content.get("평가비율") or s_content.get("평가방법") or s_content.get("성적평가") or ""
+                            c_weeks = s_content.get("주차별계획") or s_content.get("주별계획") or []
+                            c_books = s_content.get("교재") or s_content.get("교재및참고자료") or ""
+
+                            if not c_title:
+                                # Fallback to first non-empty string or dictionary keys
+                                for k, v in s_content.items():
+                                    if any(kw in str(k) for kw in ["과목", "교과", "강의"]) and isinstance(v, str):
+                                        c_title = v
+                                        break
+
+                            if c_title: lines.append(f"- **교과목명**: {c_title}")
+                            if c_prof: lines.append(f"- **담당교수**: {c_prof}")
+                            if c_eval: lines.append(f"- **평가 비율**: {json.dumps(c_eval, ensure_ascii=False) if isinstance(c_eval, dict) else c_eval}")
+                            if c_books: lines.append(f"- **교재 및 참고자료**: {json.dumps(c_books, ensure_ascii=False) if isinstance(c_books, (dict, list)) else c_books}")
+                            if c_weeks and isinstance(c_weeks, list):
+                                lines.append("- **주차별 계획 요약**:")
+                                for w in c_weeks[:8]:
+                                    if isinstance(w, dict):
+                                        w_num = w.get("주차") or w.get("주") or ""
+                                        w_topic = w.get("내용") or w.get("강의내용") or w.get("주제") or ""
+                                        lines.append(f"  • {w_num}주차: {w_topic}")
+                            lines.append(f"\n[강의계획서 전체 원문 데이터]:\n{json.dumps(s_content, ensure_ascii=False)[:1200]}")
+                            lines.append("💡 지침: 위 조회된 실제 강의계획서의 평가 비율과 주차별 수업 계획을 학생에게 친절하고 명확하게 안내하세요.")
+                            summary_out = "\n".join(lines) + "\n"
                         else:
-                            status_state = "empty"
-                            status_title = f"{tool_display_name} 결과 없음"
-                            lines.append("- 조회된 개설 강의가 없습니다.")
-                        summary_out = "\n".join(lines) + "\n"
+                            courses = []
+                            if isinstance(res, list):
+                                courses = res
+                            elif isinstance(res, dict):
+                                courses = (
+                                    res.get("rawData")
+                                    or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
+                                    or res.get("contents")
+                                    or res.get("items")
+                                    or (res.get("content") if isinstance(res.get("content"), list) else [])
+                                    or []
+                                )
+                            if isinstance(courses, dict):
+                                courses = [courses]
+
+                            mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
+                            lines = [f"\n[인천대학교 개설 강의/수업 조회 결과 ({tool_display_name})]:"]
+                            is_empty_course = False
+                            if not courses and not mcp_summary:
+                                is_empty_course = True
+                            elif mcp_summary and any(kw in mcp_summary for kw in ["없습니다", "찾지 못했습니다", "0건", "없음"]) and not courses:
+                                is_empty_course = True
+
+                            if not is_empty_course:
+                                status_state = "completed"
+                                status_title = f"{tool_display_name} 확인 완료"
+                                if courses:
+                                    first_course_id = None
+                                    for c in courses[:6]:
+                                        if isinstance(c, dict):
+                                            c_id = c.get("id")
+                                            if not first_course_id and c_id:
+                                                first_course_id = c_id
+                                            c_name = c.get("courseTitle") or c.get("courseName") or c.get("subject") or c.get("title") or "강의"
+                                            prof = c.get("professor") or c.get("prof") or ""
+                                            room = c.get("timeRoom") or c.get("classroom") or ""
+                                            credit = c.get("credit") or c.get("credits") or ""
+                                            code = c.get("courseCode") or c.get("subjectNumber") or ""
+                                            details = []
+                                            if prof: details.append(f"교수: {prof}")
+                                            if room: details.append(f"강의실/시간: {room}")
+                                            if credit: details.append(f"{credit}학점")
+                                            if code: details.append(f"과목코드: {code}")
+                                            if c_id: details.append(f"강좌ID: {c_id}")
+                                            det_str = f" ({', '.join(details)})" if details else ""
+                                            lines.append(f"- **{c_name}**{det_str}")
+                                    if first_course_id:
+                                        ac_data_out["courseOfferingId"] = first_course_id
+                                        ac_data_out["targetCourseId"] = first_course_id
+                                elif mcp_summary:
+                                    lines.append(mcp_summary)
+                                lines.append("💡 지침: 위 개설 강의 목록을 사용자에게 친절하고 명확하게 안내하세요. 가상의 과목이나 강의실을 지어내지 마세요.")
+                            else:
+                                status_state = "empty"
+                                status_title = f"{tool_display_name} 결과 없음"
+                                lines.append("- 조회된 개설 강의가 없습니다.")
+                            summary_out = "\n".join(lines) + "\n"
                     else:
                         tool_data = res
                         mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""

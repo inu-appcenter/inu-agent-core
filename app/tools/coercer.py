@@ -90,6 +90,18 @@ class SchemaCoercer:
             curr_month = datetime.now(timezone(timedelta(hours=9))).month
             coerced["term"] = "SECOND" if curr_month >= 7 else "FIRST"
 
+        # Course offerings parameter resilience:
+        # If deptName is passed, always populate keyword as fallback to avoid 400 Bad Request
+        if "deptName" in properties and coerced.get("deptName"):
+            raw_dept = str(coerced["deptName"]).strip()
+            if "keyword" in properties and not coerced.get("keyword"):
+                coerced["keyword"] = raw_dept
+            dept_prop = properties.get("deptName", {})
+            dept_enums = dept_prop.get("enum", [])
+            # If backend OpenAPI enum is mangled or doesn't match raw_dept, pop deptName so keyword handles search
+            if dept_enums and raw_dept not in dept_enums:
+                coerced.pop("deptName", None)
+
         for param, prop in properties.items():
             if param not in coerced:
                 continue
