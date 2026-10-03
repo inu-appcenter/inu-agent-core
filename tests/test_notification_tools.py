@@ -23,6 +23,15 @@ async def test_manage_reminder_tool():
     res_list = await tool.execute({"action": "LIST"}, {"auth": "Bearer test_token"})
     assert "error" in res_list or isinstance(res_list, list) or isinstance(res_list, dict)
 
+    # Test execution: create
+    res_create = await tool.execute({
+        "action": "CREATE",
+        "targetTime": "08:30",
+        "targetTool": "CAFETERIA",
+        "title": "아침 학식 알림"
+    }, {"auth": "Bearer test_token"})
+    assert "error" in res_create or isinstance(res_create, dict)
+
 
 @pytest.mark.asyncio
 async def test_daily_brief_tool():
@@ -33,6 +42,15 @@ async def test_daily_brief_tool():
     schema = tool.get_schema()
     assert schema["type"] == "function"
     assert "action" in schema["function"]["parameters"]["properties"]
+
+    # Test execution: update
+    res_update = await tool.execute({
+        "action": "UPDATE",
+        "time": "08:30",
+        "enabled": True,
+        "scope": "ALL"
+    }, {"auth": "Bearer test_token"})
+    assert "error" in res_update or isinstance(res_update, dict)
 
 
 @pytest.mark.asyncio

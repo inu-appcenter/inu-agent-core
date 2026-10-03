@@ -405,7 +405,9 @@ class AgentOrchestrator:
                     # If the user asked a composite query with multiple distinct domains (e.g. Timetable + Bus, Cafeteria + Weather)
                     # and one domain has not been executed yet, chain to it instead of prematurely quitting!
                     is_bus_query = any(kw in request.message for kw in ["버스", "인천대입구", "정류장", "노선", "순환", "배차", "도착"])
-                    is_caf_query = any(kw in request.message for kw in ["학식", "식단", "메뉴", "밥", "점심", "저녁", "아침", "식당"])
+                    is_caf_query = any(kw in request.message for kw in ["학식", "식단", "메뉴", "밥", "식당", "조식", "중식", "석식"]) or (
+                        any(kw in request.message for kw in ["점심", "저녁", "아침"]) and any(kw in request.message for kw in ["먹", "나와", "뭐 나와", "식사"])
+                    )
                     is_weather_query = any(kw in request.message for kw in ["날씨", "미세먼지", "기온", "온도", "비 와", "우산"])
 
                     if is_bus_query and "BUS" not in executed_categories and not any("bus" in n.lower() for n in executed_tool_names):
