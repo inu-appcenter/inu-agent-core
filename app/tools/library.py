@@ -110,7 +110,7 @@ class LibrarySeatTool(BaseTool):
         room_id = arguments.get("room_id")
 
         # 0. 쿼리 또는 파라미터에서 스터디룸 의도 자동 보정
-        is_study_intent = "스터디" in query or "스터디" in room_name or target in ["STUDY_ROOMS", "RESERVE_STUDY_ROOM"]
+        is_study_intent = "스터디" in query or "스터디" in room_name or target in ["STUDY_ROOMS", "STUDY_ROOM", "RESERVE_STUDY_ROOM"]
 
         # 1. 좌석 배정 신청 (RESERVE_SEAT)
         if target == "RESERVE_SEAT" or (seat_no and not is_study_intent):
@@ -135,7 +135,9 @@ class LibrarySeatTool(BaseTool):
             }
 
         # 2. 스터디룸 예약 신청 (RESERVE_STUDY_ROOM)
-        if target == "RESERVE_STUDY_ROOM":
+        # 구체적인 스터디룸 명칭이나 예약 일시가 있고, 단순 목록 조회가 아닌 경우에만 예약 확인 카드로 진입
+        is_catalog_query = any(kw in query for kw in ["목록", "종류", "어떤 방", "보여줘", "리스트", "몇개"])
+        if target == "RESERVE_STUDY_ROOM" and (room_name or arguments.get("date")) and not is_catalog_query:
             study_data = {
                 "roomName": room_name or "205호 스터디룸",
                 "roomId": room_id or 9,
@@ -155,7 +157,7 @@ class LibrarySeatTool(BaseTool):
             }
 
         # 3. 스터디룸 목록 조회 (STUDY_ROOMS)
-        if target == "STUDY_ROOMS" or is_study_intent:
+        if target in ["STUDY_ROOMS", "STUDY_ROOM"] or is_study_intent:
             return {
                 "mode": "STUDY_ROOMS",
                 "component_type": "LIBRARY_STUDY_ROOMS",

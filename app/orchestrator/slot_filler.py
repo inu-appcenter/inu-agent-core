@@ -98,8 +98,13 @@ class SlotFillingValidator:
 
         # 2. Check general action/mutation tools (Client Actions, Reservations, Post/Delete mutations)
         # Read-only query tools (OpenAPI search/list/get) are handled via normal execution / schema coercion
+        target_val = str(args.get("target") or "").upper()
+        is_library_mutation = (
+            tool_category == "LIBRARY" and any(k in target_val for k in ["RESERVE", "CANCEL", "CHECKIN", "RENEW", "RETURN"])
+        )
         is_action_mutation = (
-            tool_category in ["LIBRARY", "REMINDER", "CAMPUS_WATCH", "DAILY_BRIEF", "KEYWORD"]
+            is_library_mutation
+            or tool_category in ["REMINDER", "CAMPUS_WATCH", "DAILY_BRIEF", "KEYWORD"]
             or any(kw in t_name_lower for kw in ["reserve", "create", "delete", "toggle", "apply", "book"])
         )
         if is_action_mutation:

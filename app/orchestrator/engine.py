@@ -29,6 +29,7 @@ from app.tools.registry import tool_registry
 from app.tools.coercer import SchemaCoercer
 from app.orchestrator.drill_down import DrillDownEvaluator
 from app.orchestrator.slot_filler import SlotFillingValidator
+from app.orchestrator.serializer import GenericMcpDataSerializer
 
 
 def resolve_tool_display_name(category: str, name: str) -> str:
@@ -321,6 +322,42 @@ class AgentOrchestrator:
                             "function": {
                                 "name": s_tool.name,
                                 "arguments": {"courseOfferingId": int(target_cid)},
+                            }
+                        }]
+                elif any(kw in request.message for kw in ["개설과목", "개설 과목", "개설강의", "수업 뭐", "강의 뭐", "열렸어", "열려", "과목 목록"]) and "api_getCourseOfferings" not in executed_tool_names:
+                    course_tool = tool_registry.get_tool("api_getCourseOfferings") or tool_registry.get_tool("api_course_offerings")
+                    if course_tool:
+                        from app.tools.coercer import KOREAN_DEPARTMENTS
+                        dept_candidate = None
+                        for canon, aliases in KOREAN_DEPARTMENTS.items():
+                            if any(a in request.message for a in [canon] + aliases):
+                                dept_candidate = canon
+                                break
+                        args_to_chain = {}
+                        if dept_candidate:
+                            args_to_chain["deptName"] = dept_candidate
+                        
+                        prof_m = re.search(r"([가-힣]{2,4})\s*(?:교수님|교수|선생님)", request.message)
+                        if prof_m:
+                            args_to_chain["keyword"] = prof_m.group(1)
+                        else:
+                            from app.tools.coercer import COMMON_COURSE_ALIASES
+                            for alias, canon_title in COMMON_COURSE_ALIASES.items():
+                                if alias in request.message:
+                                    args_to_chain["keyword"] = canon_title
+                                    break
+                        logger.info(f"Deterministic Multi-Hop: Chaining to {course_tool.name} for course offerings query with args={args_to_chain}")
+                        yield AgentStreamEvent(
+                            event_type="THINKING",
+                            thinking=f"사용자가 문의한 개설 과목/수업 목록을 조회하기 위해 {course_tool.name}을 호출합니다.",
+                        )
+                        from uuid import uuid4
+                        tool_calls = [{
+                            "id": f"call_auto_course_{uuid4().hex[:6]}",
+                            "type": "function",
+                            "function": {
+                                "name": course_tool.name,
+                                "arguments": args_to_chain,
                             }
                         }]
                 elif "SEARCH" in failed_tool_categories and "NOTICE" not in executed_categories and "api_notice" not in executed_tool_names:
@@ -1301,7 +1338,12 @@ class AgentOrchestrator:
                 }
 
             # Schema-driven dynamic parameter coercion (Generic MCP standard)
-            schema_params = getattr(tool, "input_schema", None) or {}
+            schema_params = (
+                getattr(tool, "input_schema", None)
+                or getattr(tool, "parameters_schema", None)
+                or (tool.get_schema().get("function", {}).get("parameters") if hasattr(tool, "get_schema") else {})
+                or {}
+            )
             final_args = SchemaCoercer.coerce(schema_params, final_args)
 
             status_state = "completed"
@@ -1360,7 +1402,7 @@ class AgentOrchestrator:
                                 emitted_cards.add("TIMETABLE")
                     else:
                         status_state = "failed"
-                        status_title = f"{tool_display_name} 조회 실패"
+                        status_title = f"{tool_display_name} 조회 실패 ({err_msg})"
                         summary_out = (
                             f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 서버 응답 지연 또는 오류({err_msg})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
                             f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보(식단 메뉴, 버스 도착 시간, 전화번호, 시간표 등)를 지어내지 말고, "
@@ -1370,745 +1412,20 @@ class AgentOrchestrator:
                         )
 
                 elif res is not None:
-                    tool_data = res
-                    if tool.category == "BUS":
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        bus_raw = res.get("rawData") if (isinstance(res, dict) and isinstance(res.get("rawData"), dict)) else {}
-
-                        stop_name = (bus_meta.get("stopName") if bus_meta else None) or bus_raw.get("stopName") or "정류소"
-                        tab_name = (bus_meta.get("tabName") if bus_meta else None) or bus_raw.get("tabName") or "정류장"
-                        valid_routes = (bus_meta.get("validRoutes") if bus_meta else None) or bus_raw.get("validRoutes") or []
-
-                        raw_arrivals = []
-                        if isinstance(res, list):
-                            raw_arrivals = res
-                        elif isinstance(res, dict):
-                            raw_arrivals = bus_raw.get("arrivals") or res.get("arrivals") or res.get("items") or []
-
-                        filtered_arrivals = [
-                            item for item in raw_arrivals
-                            if isinstance(item, dict) and (not valid_routes or item.get("routeNo") in valid_routes)
-                        ] if valid_routes else raw_arrivals
-
-                        tool_data = {
-                            "arrivals": filtered_arrivals,
-                            "validRoutes": valid_routes,
-                            "stopName": stop_name,
-                            "tabName": tab_name,
-                        }
-                        if filtered_arrivals:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            summary_out = (
-                                f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n"
-                                f"- 모니터링 노선: {', '.join(valid_routes)}\n"
-                                f"- 실시간 도착 정보:\n{json.dumps(filtered_arrivals, ensure_ascii=False)}\n"
-                            )
-                        elif mcp_summary:
-                            if "없습니다" in mcp_summary or "운행 대기" in mcp_summary:
-                                status_state = "empty"
-                                status_title = f"{tool_display_name} 결과 없음"
-                            else:
-                                status_state = "completed"
-                                status_title = f"{tool_display_name} 확인 완료"
-                            summary_out = f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n{mcp_summary}\n"
-                        else:
-                            status_state = "empty"
-                            status_title = f"{tool_display_name} 결과 없음"
-                            summary_out = (
-                                f"\n[BUS 인천시 실시간 시내버스 도착 정보 ({stop_name})]:\n"
-                                f"- 모니터링 노선: {', '.join(valid_routes)}\n"
-                                f"- 현재 해당 정류장에 운행 대기 중이거나 도착 예정인 인팁 서비스 버스가 없습니다.\n"
-                                f"💡 지침: 학생에게 현재 운행 중이거나 도착 예정인 버스가 없음을 사실대로 안내하세요. 절대로 임의의 도착 시간을 지어내지 마세요.\n"
-                            )
-                    elif tool.category == "CAFETERIA":
-                        tool_data = res
-                        caf_name = final_args.get("cafeteria", "학생식당")
-                        raw_menus = []
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        if isinstance(res, list):
-                            raw_menus = res
-                        elif isinstance(res, dict):
-                            raw_menus = (
-                                res.get("rawData")
-                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
-                                or res.get("data")
-                                or res.get("items")
-                                or res.get("menus")
-                                or res.get("cafeterias")
-                                or []
-                            )
-                            if isinstance(raw_menus, dict):
-                                raw_menus = [raw_menus]
-
-                        lines = [f"\n[CAFETERIA {caf_name} 식단 메뉴 조회 결과]:"]
-                        has_valid_menu = False
-
-                        # Case 1: List of strings [조식, 중식, 석식] (Spring Boot INU Portal standard format)
-                        if isinstance(raw_menus, list) and raw_menus and isinstance(raw_menus[0], str):
-                            meal_names = ["조식(아침)", "중식(점심)", "석식(저녁)"]
-                            for idx, menu_text in enumerate(raw_menus):
-                                label = meal_names[idx] if idx < len(meal_names) else f"식단 {idx+1}"
-                                clean_text = str(menu_text).strip()
-                                if clean_text and clean_text != "-" and clean_text != "운영없음" and clean_text != "식단 없음":
-                                    has_valid_menu = True
-                                    lines.append(f"### [{label}]\n{clean_text}\n")
-                                else:
-                                    lines.append(f"- {label}: 운영 없음 또는 식단 미등록")
-
-                        # Case 2: List of dicts
-                        elif isinstance(raw_menus, list):
-                            for m in raw_menus:
-                                if isinstance(m, dict):
-                                    if "breakfast" in m or "lunch" in m or "dinner" in m:
-                                        b = m.get("breakfast")
-                                        l = m.get("lunch")
-                                        d = m.get("dinner")
-                                        for meal_label, meal_val in [("조식(아침)", b), ("중식(점심)", l), ("석식(저녁)", d)]:
-                                            clean_val = str(meal_val).strip() if meal_val else ""
-                                            if clean_val and clean_val not in ["-", "운영없음", "식단 없음"]:
-                                                has_valid_menu = True
-                                                lines.append(f"### [{meal_label}]\n{clean_val}\n")
-                                            elif clean_val:
-                                                lines.append(f"- {meal_label}: {clean_val}")
-                                    else:
-                                        corner = m.get("name") or m.get("cornerName") or m.get("corner") or "코너"
-                                        menu_str = m.get("menu") or m.get("menuName") or ""
-                                        meal_label = m.get("mealLabel") or m.get("mealType") or ""
-                                        if menu_str and menu_str != "-":
-                                            has_valid_menu = True
-                                            prefix = f"[{meal_label}] " if meal_label else ""
-                                            lines.append(f"- {prefix}{corner}: {menu_str}")
-
-                        if not has_valid_menu and mcp_summary:
-                            if "올바르지 않습니다" in mcp_summary or "오류가 발생했습니다" in mcp_summary or "에러" in mcp_summary:
-                                status_state = "failed"
-                                status_title = f"{tool_display_name} 조회 실패"
-                                summary_out = (
-                                    f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 서버 파라미터 오류가 발생했습니다.\n"
-                                    f"⚠️ 핵심 지침: 학생에게 현재 식단 정보를 불러오는 중 일시적 오류가 발생했음을 사실대로 안내하세요.\n"
-                                )
-                            elif any(k in mcp_summary for k in ["쉽니다", "운영하지 않습니다", "정보가 없습니다", "등록된 식단이 없습니다", "식단 없음", "운영 없음"]):
-                                status_state = "empty"
-                                status_title = f"{tool_display_name} 결과 없음"
-                                summary_out = f"\n[CAFETERIA {caf_name} 식단 안내]:\n{mcp_summary}\n"
-                            else:
-                                has_valid_menu = True
-                                lines.append(f"\n{mcp_summary}")
-
-                        if has_valid_menu:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            lines.append("\n⚠️ 핵심 지침: 반드시 위 실제 조회된 메뉴 목록에 근거하여 안내하세요. 위 목록에 없는 가상의 메뉴를 절대로 추가하거나 지어내지 마세요.")
-                            summary_out = "\n".join(lines) + "\n"
-                        elif status_state != "failed":
-                            status_state = "empty"
-                            status_title = f"{tool_display_name} 결과 없음"
-                            summary_out = (
-                                f"\n[CAFETERIA {caf_name} 식단 메뉴 조회 결과]:\n"
-                                f"- 현재 {caf_name}에 등록된 식단 메뉴가 없습니다 (식당 운영 시간 외 또는 식단 미등록 상태).\n"
-                                f"⚠️ 핵심 지침: 절대로 가상의 식단 메뉴를 지어내어 답변하지 마세요. 학생에게 '현재 {caf_name}의 식단 정보가 등록되어 있지 않거나 식당 미운영 상태입니다'라고 사실대로 안내하세요.\n"
-                            )
-                    elif tool.category == "LIBRARY" and isinstance(res, dict):
-                        tool_data = res
-                        lib_raw = res.get("rawData") if isinstance(res.get("rawData"), dict) else (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else res)
-                        mcp_summary = (res.get("summary") or "").strip()
-                        mode = lib_raw.get("mode") or res.get("mode")
-                        if mode == "STUDY_ROOMS":
-                            study_rooms = lib_raw.get("rooms") or lib_raw.get("data", {}).get("rooms", []) or res.get("rooms", [])
-                            rooms_info = "\n".join([
-                                f"- {r.get('name')}: 위치 {r.get('location')}, 수용정원 {r.get('quota')}, 구비시설 ({', '.join(r.get('tags', []))})"
-                                for r in study_rooms if isinstance(r, dict)
-                            ])
-                            notice = lib_raw.get("notice") or res.get("notice", "")
-                            summary_out = (
-                                f"\n[학산도서관 스터디룸 목록 및 예약 안내]:\n"
-                                f"{rooms_info}\n"
-                                f"- 이용 규정: {notice}\n"
-                                f"💡 지침: 학생에게 위 스터디룸 목록을 친절히 안내하고, 대화창의 [학산도서관 스터디룸] 카드에서 원하는 방을 터치하면 바로 예약 화면으로 연결된다고 설명하세요.\n"
-                            )
-                        elif mode in ["RESERVE_SEAT", "RESERVE_STUDY_ROOM"]:
-                            summary_out = (
-                                f"\n[학산도서관 대화형 신청 카드 발급 완료]:\n"
-                                f"{lib_raw.get('instruction') or res.get('instruction', '')}\n"
-                            )
-                        else:
-                            rooms = lib_raw.get("rooms") or res.get("rooms", [])
-                            if rooms:
-                                rooms_info = "\n".join([
-                                    f"- {r.get('name', '')}: 잔여 {r.get('available_seats', r.get('seats', {}).get('available', 0))}석 / 전체 {r.get('total_seats', r.get('seats', {}).get('total', 0))}석"
-                                    for r in rooms if isinstance(r, dict)
-                                ])
-                                summary_out = (
-                                    f"\n[학산도서관 열람실 실시간 잔여 좌석 현황 (공식 pyxis 시스템 실시간 관측 데이터)]:\n"
-                                    f"{rooms_info}\n"
-                                    f"⚠️ 지침: 반드시 위 실제 실시간 잔여 좌석 수치 그대로 학생에게 안내하세요 (임의의 숫자를 지어내지 마세요). "
-                                    f"대화창 아래 제공된 실시간 열람실 카드에서 원하는 열람실을 터치하면 좌석 배정 화면으로 이동할 수 있음을 덧붙이세요.\n"
-                                )
-                            elif mcp_summary:
-                                summary_out = f"\n[학산도서관 실시간 좌석 현황]:\n{mcp_summary}\n"
-                            else:
-                                status_state = "empty"
-                                status_title = f"{tool_display_name} 결과 없음"
-                                summary_out = "\n[학산도서관]: 현재 조회 가능한 좌석 정보가 없습니다.\n"
-                    elif tool.category == "CAMPUS_WATCH" and isinstance(res, dict):
-                        tool_data = res
-                        summary_out = f"\n[학산도서관 실시간 빈자리 알림/스나이퍼 감시 결과]:\n{res.get('summary', '')}\n"
-                    elif tool.category == "TIMETABLE":
-                        tool_data = res if res is not None else {}
-                        classes = []
-                        if isinstance(res, list):
-                            classes = res
-                        elif isinstance(res, dict):
-                            classes = (
-                                res.get("rawData")
-                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
-                                or res.get("items")
-                                or res.get("todayClasses")
-                                or res.get("courses")
-                                or []
-                            )
-                        if isinstance(classes, dict):
-                            classes = [classes]
-
-                        if not classes:
-                            status_state = "empty"
-                            status_title = f"{tool_display_name} 결과 없음"
-                            summary_out = (
-                                "\n[INTIP 인팁 시간표 조회 결과]:\n"
-                                "- 오늘 등록된 수업/강의 일정이 없습니다 (또는 인팁 앱에 시간표가 등록되어 있지 않습니다).\n"
-                                "💡 지침: 학생에게 오늘 예정된 수업이 없거나 시간표가 등록되지 않았음을 친절히 안내하고, '인팁 앱의 [시간표] 탭에서 이번 학기 시간표를 추가하거나 확인할 수 있어요'라고 안내하세요.\n"
-                                "⚠️ 중요: 이 기능은 인팁(INTIP) 앱 자체의 시간표 기능이므로, 포털/LMS 계정 연동을 절대 요구하지 마세요.\n"
-                                "⚠️ 최우선 복합 질의 지침: 사용자가 함께 질문한 다른 내용(예: 버스 도착 정보 등)이 있다면 절대로 포기하지 말고 해당 도구를 계속 호출하여 완료하세요.\n"
-                            )
-                        else:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            summary_out = (
-                                f"\n[INTIP 인팁 오늘의 수업 시간표]:\n"
-                                f"{json.dumps(classes, ensure_ascii=False)[:1000]}\n"
-                                f"💡 지침: 학생에게 오늘 수업 시간과 강의실을 명확히 안내하고, 하단의 [나의 수업 시간표] 카드에서 전체 시간표를 확인할 수 있다고 덧붙이세요.\n"
-                                f"⚠️ 최우선 복합 질의 지침: 사용자가 함께 질문한 다른 내용(예: 버스 도착 정보 등)이 있다면 절대로 포기하지 말고 해당 도구를 계속 호출하여 완료하세요.\n"
-                            )
-                    elif tool.category == "REMINDER":
-                        tool_data = res
-                        summary_out = f"\n[AI 맞춤 알림(리마인더) 처리 결과]:\n{json.dumps(res, ensure_ascii=False)}\n💡 지침: 알림 등록/수정/삭제/조회 결과를 사용자에게 친절하고 명확하게 안내하세요.\n"
-                    elif tool.category == "DAILY_BRIEF":
-                        tool_data = res
-                        summary_out = f"\n[데일리 브리프 아침 일정 설정 결과]:\n{json.dumps(res, ensure_ascii=False)}\n💡 지침: 데일리 브리프 시간 및 활성화 설정 상태를 친절히 안내하세요.\n"
-                    elif tool.category == "KEYWORD":
-                        tool_data = res
-                        summary_out = f"\n[공지사항 키워드 알림 구독 결과]:\n{json.dumps(res, ensure_ascii=False)}\n💡 지침: 공지 키워드 등록/조회/삭제 결과를 사용자에게 명확히 안내하세요.\n"
-                    elif tool.category == "SETTINGS":
-                        tool_data = res
-                        summary_out = f"\n[내 맞춤 알림 및 브리프 종합 설정]:\n{json.dumps(res, ensure_ascii=False)}\n💡 지침: 등록된 키워드, 맞춤 알림, 데일리 브리프 설정을 일목요연하게 정리해 안내하세요.\n"
-                    elif tool.category == "DIRECTORY":
-                        tool_data = res
-                        q_param = str(final_args.get("query") or "").strip()
-                        raw_list = []
-                        if isinstance(res, list):
-                            raw_list = res
-                        elif isinstance(res, dict):
-                            raw_list = (
-                                res.get("rawData")
-                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
-                                or res.get("contents")
-                                or res.get("items")
-                                or (res.get("data", {}).get("contents") if isinstance(res.get("data"), dict) else [])
-                                or (res.get("data") if isinstance(res.get("data"), list) else [])
-                                or []
-                            )
-                        if isinstance(raw_list, dict):
-                            raw_list = [raw_list]
-
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        is_empty = False
-                        if not raw_list and not mcp_summary:
-                            is_empty = True
-                        elif mcp_summary and ("찾지 못했습니다" in mcp_summary or "없습니다" in mcp_summary) and not raw_list:
-                            is_empty = True
-
-                        if is_empty:
-                            status_state = "empty"
-                            status_title = f"{q_param} 연락처 결과 없음" if q_param else f"{tool_display_name} 결과 없음"
-                            summary_out = (
-                                f"\n[교내 부서/학과/교수 연락처 검색 결과 (검색어: '{q_param}')]:\n"
-                                f"- 검색어 '{q_param}' 관련 연락처가 교내 전화번호부 DB에 등록되어 있지 않습니다 (0건).\n"
-                                f"💡 [자가 회복 및 교차 탐색 지침 (Self-Correction & Fallback)]:\n"
-                                f"전화번호부 DB에 일치하는 결과가 없습니다. 절대로 첫 시도 실패만으로 조회를 포기하지 마십시오!\n"
-                                f"1) 인천대학교 전 도메인 고도화 통합 검색 도구(api_unified_search 또는 unifiedSearch)를 즉시 호출하여 학교 공식 홈페이지, 부서 조직도, 공지사항 등에서 '{q_param}' 연락처 및 위치를 포괄적으로 검색하세요.\n"
-                                f"2) 또는 검색어를 단과대/핵심 명칭(예: '정보기술대학' 또는 '정보기술')으로 단순화하여 재검색을 시도하세요.\n"
-                            )
-                        else:
-                            status_state = "completed"
-                            status_title = f"{q_param} 연락처 확인 완료" if q_param else f"{tool_display_name} 확인 완료"
-                            if mcp_summary and "찾지 못했습니다" not in mcp_summary:
-                                summary_out = (
-                                    f"\n[교내 부서/학과/교수 연락처 검색 결과 (검색어: '{q_param}')]:\n"
-                                    f"{mcp_summary}\n"
-                                    f"💡 지침: 위 조회된 실제 연락처(전화번호, 이메일, 연구실/사무실 위치 등)를 학생에게 사실대로 정확히 안내하세요. 가상의 정보를 임의로 추가하거나 지어내지 마세요.\n"
-                                )
-                            else:
-                                lines = [f"\n[교내 부서/학과/교수 연락처 검색 결과 (검색어: '{q_param}')]:"]
-                                for e in raw_list[:6]:
-                                    if isinstance(e, dict):
-                                        dept_name = e.get("departmentName") or e.get("deptName") or ""
-                                        name = e.get("name") or ""
-                                        if dept_name and not name:
-                                            colg = e.get("collegeName") or ""
-                                            phone = e.get("officePhoneNumber") or e.get("phoneNumber") or ""
-                                            loc = e.get("officeLocation") or e.get("location") or ""
-                                            hp = e.get("homepageUrl") or ""
-                                            label = f"{dept_name} ({colg})" if colg else dept_name
-                                            lines.append(f"- [학과 사무실] {label}: 📞 {phone}" + (f" (위치: {loc})" if loc else "") + (f", 홈페이지: {hp}" if hp else ""))
-                                        else:
-                                            pos = e.get("position") or ""
-                                            affil = e.get("detailAffiliation") or e.get("affiliation") or ""
-                                            phone = e.get("phoneNumber") or ""
-                                            email = e.get("email") or ""
-                                            lines.append(f"- [교수/교직원] {name} ({pos}, {affil}): 📞 {phone}" + (f", ✉️ {email}" if email else ""))
-                                lines.append("💡 지침: 위 조회된 실제 연락처(전화번호, 이메일, 연구실/사무실 위치 등)를 학생에게 사실대로 정확히 안내하세요.")
-                                summary_out = "\n".join(lines) + "\n"
-                    elif tool.category == "SCHEDULE":
-                        tool_data = res
-                        sched_list = []
-                        if isinstance(res, list):
-                            sched_list = res
-                        elif isinstance(res, dict):
-                            sched_list = (
-                                res.get("rawData")
-                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
-                                or res.get("items")
-                                or res.get("contents")
-                                or res.get("schedules")
-                                or (res.get("data") if isinstance(res.get("data"), list) else [])
-                                or []
-                            )
-                        if isinstance(sched_list, dict):
-                            sched_list = [sched_list]
-
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        lines = [f"\n[인천대학교 학사일정 조회 결과 ({tool_display_name})]:"]
-                        is_empty = False
-                        if not sched_list and not mcp_summary:
-                            is_empty = True
-                        elif mcp_summary and any(kw in mcp_summary for kw in ["없습니다", "찾지 못했습니다", "0건", "없음", "일정이 없습니다"]) and not sched_list:
-                            is_empty = True
-
-                        if not is_empty:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            if sched_list:
-                                for s in sched_list[:8]:
-                                    if isinstance(s, dict):
-                                        title = s.get("title") or s.get("content") or "학사일정"
-                                        start = s.get("start") or s.get("startDate") or ""
-                                        end = s.get("end") or s.get("endDate") or ""
-                                        date_str = f"{start} ~ {end}" if start and end and start != end else (start or end or "일정 미정")
-                                        cal_link = f"/home/calendar?date={start}" if start else "/home/calendar"
-                                        lines.append(f"- [{title}]({cal_link}) (기간: {date_str})")
-                            elif mcp_summary:
-                                lines.append(mcp_summary)
-                            lines.append("\n💡 [학사일정 링크 작성 지침]: 학사일정에는 절대 공지사항 링크(/home/notice/{id})를 붙이지 마세요! 위 제공된 인팁 앱 캘린더 상대 경로인 `[일정명](/home/calendar?date=YYYY-MM-DD)`(시작일 기준) 또는 `[학사일정 전체보기](/home/calendar)`로만 마크다운 링크를 표(|---|---|)나 목록에 그대로 작성하세요.")
-                        else:
-                            status_state = "empty"
-                            status_title = f"{tool_display_name} 결과 없음"
-                            lines.append("- 조회된 학사일정이 없습니다.")
-                            lines.append("💡 [학사일정 링크 작성 지침]: 학생에게 등록된 일정이 없음을 안내하고, 전체 학사일정을 확인할 수 있도록 `[학사일정 전체보기](/home/calendar)` 링크를 제공하세요.")
-                        summary_out = "\n".join(lines) + "\n"
-                    elif tool.category == "NOTICE":
-                        tool_data = res
-                        notices_list = []
-                        if isinstance(res, list):
-                            notices_list = res
-                        elif isinstance(res, dict):
-                            notices_list = (
-                                res.get("rawData")
-                                or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
-                                or res.get("contents")
-                                or res.get("items")
-                                or res.get("notices")
-                                or []
-                            )
-                        if isinstance(notices_list, dict):
-                            notices_list = [notices_list]
-
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        lines = [f"\n[인천대학교 공지사항 조회 결과 ({tool_display_name})]:"]
-                        is_empty_notice = False
-                        if not notices_list and not mcp_summary:
-                            is_empty_notice = True
-                        elif mcp_summary and any(kw in mcp_summary for kw in ["없습니다", "찾지 못했습니다", "0건", "없음"]) and not notices_list:
-                            is_empty_notice = True
-
-                        if not is_empty_notice:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            if notices_list:
-                                for n in notices_list[:5]:
-                                    if isinstance(n, dict):
-                                        t = n.get("title") or "공지사항"
-                                        n_id = n.get("id")
-                                        # INTIP 내부 상세 페이지 경로 (/home/notice/{id}) 연결로 외부 브라우저 이탈 방지
-                                        u = f"/home/notice/{n_id}" if n_id else (n.get("url") or "")
-                                        d = n.get("createDate") or n.get("date") or ""
-                                        w = n.get("writer") or n.get("category") or ""
-                                        link_str = f"[{t}]({u})" if u else t
-                                        sub_str = f" (게시일: {d}, 작성: {w})" if d or w else ""
-                                        lines.append(f"- {link_str}{sub_str}")
-                            elif mcp_summary:
-                                lines.append(mcp_summary)
-                            lines.append("💡 [중요 지침]: 위 공지 제목과 내부 상세 링크(/home/notice/{공지ID})를 마크다운 링크 형식([공지제목](/home/notice/{id}))으로 답변에 그대로 포함하여 안내하세요. 외부 브라우저로 나가지 않고 INTIP 앱 내부 상세 페이지로 열립니다.")
-                        else:
-                            status_state = "empty"
-                            status_title = f"{tool_display_name} 결과 없음"
-                            lines.append(f"- 현재 등록된 {tool_display_name} 게시글이 없습니다 (0건).")
-                            lines.append(f"⚠️ 핵심 지침: 시스템 오류나 서버 응답 지연 핑계를 대지 마십시오. 학생에게 '현재 등록된 {tool_display_name} 내역이 없습니다'라고 사실 그대로 정직하게 안내하세요.")
-                        summary_out = "\n".join(lines) + "\n"
-                    elif tool.category == "SEARCH" or "unifiedsearch" in tool.name.lower():
-                        tool_data = res
-                        if isinstance(res, dict):
-                            s_data = res.get("rawData") if isinstance(res.get("rawData"), dict) else res
-                            if isinstance(s_data, dict) and "items" in s_data and isinstance(s_data["items"], list) and s_data["items"]:
-                                first_item = s_data["items"][0]
-                                if isinstance(first_item, dict) and any(k in first_item for k in ["notices", "schedules", "directory", "departmentNotices"]):
-                                    s_data = first_item
-                            total_cnt = s_data.get("totalCount", 0)
-                            q_val = s_data.get("query") or s_data.get("q") or final_args.get("q") or final_args.get("query", "")
-                            mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                            lines = [f"\n[인천대학교 통합 검색 결과 (검색어: '{q_val}', 총 {total_cnt}건)]:"]
-
-                            notices = s_data.get("notices", {}).get("items", []) if isinstance(s_data.get("notices"), dict) else []
-                            if notices:
-                                lines.append("- 📢 학교 공지사항:")
-                                for n in notices[:5]:
-                                    t = n.get("title") or "공지사항"
-                                    n_id = n.get("id")
-                                    # INTIP 내부 상세 페이지 경로 (/home/notice/{id}) 연결로 외부 브라우저 이탈 방지
-                                    u = f"/home/notice/{n_id}" if n_id else (n.get("url") or "")
-                                    d = n.get("createDate") or ""
-                                    w = n.get("writer") or n.get("category") or ""
-                                    link_str = f"[{t}]({u})" if u else t
-                                    sub_str = f" (게시일: {d}, 작성: {w})" if d or w else ""
-                                    lines.append(f"  • {link_str}{sub_str}")
-
-                            dept_notices = s_data.get("departmentNotices", {}).get("items", []) if isinstance(s_data.get("departmentNotices"), dict) else []
-                            if dept_notices:
-                                lines.append("- 📢 학과 공지사항:")
-                                for dn in dept_notices[:5]:
-                                    t = dn.get("title") or "학과공지"
-                                    u = dn.get("url") or ""
-                                    dept = dn.get("departmentName") or dn.get("department") or ""
-                                    d = dn.get("createDate") or ""
-                                    link_str = f"[{t}]({u})" if u else t
-                                    sub_str = f" (학과: {dept}, 게시일: {d})" if dept or d else ""
-                                    lines.append(f"  • {link_str}{sub_str}")
-
-                            dirs = s_data.get("directory", {}).get("items", []) if isinstance(s_data.get("directory"), dict) else []
-                            if dirs:
-                                lines.append("- 📞 교직원 및 학과 연락처:")
-                                for di in dirs[:3]:
-                                    name = di.get("name") or "교직원/학과"
-                                    aff = di.get("detailAffiliation") or di.get("affiliation") or ""
-                                    phone = di.get("phoneNumber") or ""
-                                    pos = di.get("position") or di.get("duties") or ""
-                                    lines.append(f"  • {name} ({aff}): 📞 {phone} {pos}".strip())
-
-                            scheds = s_data.get("schedules", {}).get("items", []) if isinstance(s_data.get("schedules"), dict) else []
-                            if scheds:
-                                lines.append("- 📅 학사일정:")
-                                for s in scheds[:5]:
-                                    content = s.get("content") or s.get("title") or "학사일정"
-                                    start = s.get("startDate") or s.get("start") or ""
-                                    end = s.get("endDate") or s.get("end") or ""
-                                    date_str = f" (기간: {start} ~ {end})" if start and end and start != end else (f" (날짜: {start})" if start else "")
-                                    cal_link = f"/home/calendar?date={start}" if start else "/home/calendar"
-                                    lines.append(f"  • [{content}]({cal_link}){date_str}")
-
-                            courses = s_data.get("courses", {}).get("items", []) if isinstance(s_data.get("courses"), dict) else []
-                            if courses:
-                                # 현재 시점 기준 학기 표기 보강 (통합검색 강의 목록의 연도/학기 식별력 제고)
-                                from datetime import datetime, timezone, timedelta
-                                kst_dt = datetime.now(timezone(timedelta(hours=9)))
-                                cur_term_str = "1학기" if 3 <= kst_dt.month <= 8 else "2학기"
-                                cur_year = kst_dt.year if kst_dt.month >= 3 else kst_dt.year - 1
-                                lines.append(f"- 📚 개설강의 [{cur_year}학년도 {cur_term_str}]:")
-                                for c in courses[:5]:
-                                    c_name = c.get("courseName") or c.get("title") or "강의"
-                                    # HTML <mark> 태그 제거
-                                    c_name = re.sub(r"</?mark>", "", c_name)
-                                    prof = c.get("professor") or c.get("prof") or ""
-                                    prof = re.sub(r"</?mark>", "", prof)
-                                    time_room = c.get("timeRoom") or c.get("room") or ""
-                                    credit = c.get("credit") or ""
-                                    hy_name = c.get("hyName") or ""  # 학년 (예: 3학년)
-                                    isu_name = c.get("isuName") or ""  # 이수구분 (예: 전공선택, 전필)
-                                    sub_num = c.get("subjectNumber") or ""  # 학수번호
-                                    
-                                    details = []
-                                    if prof: details.append(f"{prof} 교수")
-                                    if isu_name: details.append(isu_name)
-                                    if hy_name: details.append(hy_name)
-                                    if credit: details.append(f"{credit}학점")
-                                    if time_room: details.append(time_room)
-                                    if sub_num: details.append(f"학수번호: {sub_num}")
-                                    det_str = f" ({', '.join(details)})" if details else ""
-                                    lines.append(f"  • {c_name}{det_str}".strip())
-
-                            clubs = s_data.get("clubs", {}).get("items", []) if isinstance(s_data.get("clubs"), dict) else []
-                            if clubs:
-                                lines.append("- 🎯 동아리:")
-                                for cl in clubs[:3]:
-                                    lines.append(f"  • {cl.get('name')} ({cl.get('category')}, {cl.get('room')})")
-
-                            posts = s_data.get("posts", {}).get("items", []) if isinstance(s_data.get("posts"), dict) else []
-                            if posts:
-                                lines.append("- 💬 커뮤니티:")
-                                for p in posts[:3]:
-                                    lines.append(f"  • {p.get('title')} ({p.get('board')}, 추천: {p.get('likeCount')})")
-
-                            if "오류가 발생했습니다" in mcp_summary:
-                                status_state = "failed"
-                                status_title = f"{tool_display_name} 조회 실패"
-                                summary_out = (
-                                    f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 서버 응답 오류가 발생했습니다.\n"
-                                    f"💡 [자율 대체 검색 지침]: 통합 검색 엔진(Elasticsearch)이 일시 장애 상태입니다. "
-                                    f"사용자가 찾고자 하는 정보('{q_val}')를 제공하기 위해, 즉시 학교 공지사항 검색 도구(`api_notice`)를 호출하여 공지사항에서 정보를 찾아 안내하세요.\n"
-                                )
-                            elif total_cnt == 0:
-                                status_state = "empty"
-                                status_title = f"{tool_display_name} 결과 없음"
-                                lines.append("- 검색 결과가 0건입니다.")
-                                lines.append("💡 [자율 재검색 지침]: 결과가 0건이므로, 질문에서 불필요한 수식어를 덜어내거나 상위어/동의어로 검색어를 완화하여 1회 재검색(Query Expansion)할 수 있습니다. 이미 재검색했거나 마땅한 키워드가 없으면 검색 결과가 없음을 친절히 안내하세요.")
-                                summary_out = "\n".join(lines) + "\n"
-                            else:
-                                status_state = "completed"
-                                status_title = f"{tool_display_name} 확인 완료"
-                                lines.append("💡 [중요 지침]: 검색 결과가 충분히 확보되었습니다. 추가 도구 호출을 즉시 중단하고, 위 공지 제목과 제공된 링크(학교공지는 INTIP 내부 상세 경로인 /home/notice/{공지ID})를 표나 목록에 마크다운 링크([공지제목](링크)) 형태로 그대로 포함하여 최종 답변을 작성하세요. 단순 텍스트로만 제목을 적지 마십시오.")
-                                summary_out = "\n".join(lines) + "\n"
-                        else:
-                            summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
-                    elif tool.category == "WEATHER":
-                        tool_data = res
-                        w_raw = res.get("rawData") if (isinstance(res, dict) and isinstance(res.get("rawData"), dict)) else (res if isinstance(res, dict) else {})
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        if "오류가 발생했습니다" in mcp_summary or (not w_raw and not mcp_summary):
-                            status_state = "failed"
-                            status_title = f"{tool_display_name} 조회 실패"
-                            summary_out = f"\n[날씨 실시간 조회 실패]: 현재 기상청/교내 날씨 서버와 통신할 수 없습니다.\n"
-                        else:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            temp = w_raw.get("temperature") or w_raw.get("temp")
-                            sky = w_raw.get("sky") or w_raw.get("weather") or ""
-                            pm10 = w_raw.get("pm10Grade") or w_raw.get("pm10") or ""
-                            pm25 = w_raw.get("pm25Grade") or w_raw.get("pm25") or ""
-                            lines = ["\n[송도 캠퍼스 실시간 날씨 및 대기 정보]:"]
-                            if mcp_summary:
-                                lines.append(mcp_summary)
-                            else:
-                                if temp is not None:
-                                    lines.append(f"- 현재 기온: {temp}°C")
-                                if sky:
-                                    lines.append(f"- 하늘 상태: {sky}")
-                                if pm10:
-                                    lines.append(f"- 미세먼지: {pm10}")
-                                if pm25:
-                                    lines.append(f"- 초미세먼지: {pm25}")
-                            lines.append("💡 지침: 송도 캠퍼스 실시간 기온과 날씨, 미세먼지 정보를 학생에게 친절히 안내하세요.")
-                            summary_out = "\n".join(lines) + "\n"
-                    elif tool.category == "CLUB":
-                        tool_data = res
-                        c_raw = res.get("rawData") if (isinstance(res, dict) and isinstance(res.get("rawData"), dict)) else (res if isinstance(res, dict) else {})
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        items_list = c_raw.get("items") or res.get("items") or []
-                        total_cnt = c_raw.get("totalCount", len(items_list)) if isinstance(c_raw, dict) else len(items_list)
-                        if "오류" in mcp_summary:
-                            status_state = "failed"
-                            status_title = f"{tool_display_name} 조회 실패"
-                            summary_out = f"\n[동아리 목록 조회 실패]: 동아리 정보를 불러오는 중 오류가 발생했습니다.\n"
-                        elif total_cnt == 0 or (not items_list and "조회된 정보가 없습니다" in mcp_summary):
-                            status_state = "empty"
-                            status_title = f"{tool_display_name} 결과 없음"
-                            summary_out = f"\n[교내 동아리 목록]: 현재 등록된 동아리 정보가 없습니다.\n"
-                        else:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            summary_out = f"\n[교내 동아리 목록 조회 결과 ({total_cnt}건)]:\n{mcp_summary or json.dumps(items_list[:5], ensure_ascii=False)}\n"
-                    elif tool.category == "LOST_PROPERTY":
-                        tool_data = res
-                        lp_raw = res.get("rawData") if (isinstance(res, dict) and isinstance(res.get("rawData"), dict)) else (res if isinstance(res, dict) else {})
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        items_list = lp_raw.get("items") or res.get("items") or []
-                        if "오류" in mcp_summary:
-                            status_state = "failed"
-                            status_title = f"{tool_display_name} 조회 실패"
-                            summary_out = f"\n[분실물 조회 실패]: 학내 분실물 목록 조회 중 일시적인 시스템 오류가 발생했습니다.\n"
-                        elif not items_list and ("없습니다" in mcp_summary or "0건" in mcp_summary or not lp_raw):
-                            status_state = "empty"
-                            status_title = f"{tool_display_name} 결과 없음"
-                            summary_out = f"\n[학내 분실물 목록]: 현재 등록된 분실물/습득물 내역이 없습니다.\n"
-                        else:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            summary_out = f"\n[학내 분실물/습득물 조회 결과]:\n{mcp_summary or json.dumps(items_list[:5], ensure_ascii=False)}\n"
-                    elif tool.category == "TIMETABLE_GAP":
-                        tool_data = res
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        ui_comp = res.get("uiComponent") if isinstance(res, dict) else None
-                        ui_type = ui_comp.get("type") if isinstance(ui_comp, dict) else None
-                        if "오류" in mcp_summary:
-                            status_state = "failed"
-                            status_title = f"{tool_display_name} 조회 실패"
-                            summary_out = f"\n[공강 시간 분석 오류]: {mcp_summary}\n"
-                        elif ui_type == "AUTH_REQUIRED" or "로그인" in mcp_summary:
-                            status_state = "empty"
-                            status_title = f"{tool_display_name} 결과 없음"
-                            summary_out = (
-                                f"\n[공강 시간 분석 안내]:\n{mcp_summary}\n"
-                                f"💡 지침: 공강 시간을 분석하려면 인팁(INTIP) 시간표가 필요함을 안내하세요.\n"
-                            )
-                        else:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            summary_out = f"\n[공강 시간 분석 결과]:\n{mcp_summary}\n"
-                    elif tool.category == "COURSE":
-                        tool_data = res
-                        is_syllabus = "syllabus" in tool.name.lower() or "courseofferingid" in str(final_args).lower()
-                        s_content = res.get("content") if isinstance(res, dict) else None
-
-                        if is_syllabus and isinstance(s_content, dict) and s_content:
-                            status_state = "completed"
-                            status_title = f"{tool_display_name} 확인 완료"
-                            lines = [f"\n[교과목 강의계획서 상세 조회 결과 ({tool_display_name})]:"]
-                            # Extract syllabus fields (e.g. 교과목명, 교수명, 평가비율, 주별계획)
-                            c_title = s_content.get("과목명") or s_content.get("교과목명") or s_content.get("교과목") or ""
-                            c_prof = s_content.get("교수") or s_content.get("담당교수") or s_content.get("교수명") or ""
-                            c_eval = s_content.get("성적평가비율") or s_content.get("평가비율") or s_content.get("성적평가") or ""
-                            c_method = s_content.get("학습평가방법") or s_content.get("평가방법") or ""
-                            c_weeks = s_content.get("주별수업계획") or s_content.get("주차별계획") or s_content.get("주별계획") or []
-                            c_books = s_content.get("교재") or s_content.get("교재및참고자료") or ""
-
-                            if not c_title:
-                                # Fallback to first non-empty string or dictionary keys
-                                for k, v in s_content.items():
-                                    if any(kw in str(k) for kw in ["과목", "교과", "강의"]) and isinstance(v, str):
-                                        c_title = v
-                                        break
-
-                            if c_title: lines.append(f"- **교과목명**: {c_title}")
-                            if c_prof: lines.append(f"- **담당교수**: {c_prof}")
-                            if c_eval: lines.append(f"- **성적 평가 비율**: {json.dumps(c_eval, ensure_ascii=False) if isinstance(c_eval, dict) else c_eval}")
-                            if c_method: lines.append(f"- **학습 평가 방법**: {c_method}")
-                            if c_books: lines.append(f"- **교재 및 참고자료**: {json.dumps(c_books, ensure_ascii=False) if isinstance(c_books, (dict, list)) else c_books}")
-                            if c_weeks and isinstance(c_weeks, list):
-                                lines.append("- **주차별 계획 요약**:")
-                                for w in c_weeks[:15]:
-                                    if isinstance(w, dict):
-                                        w_num = w.get("주차") or w.get("주") or ""
-                                        w_topic = w.get("내용") or w.get("강의내용") or w.get("주제") or ""
-                                        lines.append(f"  • {w_num}주차: {w_topic}")
-                            lines.append(f"\n[강의계획서 전체 원문 데이터]:\n{json.dumps(s_content, ensure_ascii=False)[:2000]}")
-                            lines.append("💡 지침: 위 조회된 실제 강의계획서의 평가 비율(중간고사, 기말고사, 출석, 과제 등)과 주차별 수업 계획을 학생에게 친절하고 명확하게 안내하세요.")
-                            summary_out = "\n".join(lines) + "\n"
-                        else:
-                            courses = []
-                            if isinstance(res, list):
-                                courses = res
-                            elif isinstance(res, dict):
-                                courses = (
-                                    res.get("rawData")
-                                    or (res.get("uiComponent", {}).get("data") if isinstance(res.get("uiComponent"), dict) else [])
-                                    or res.get("contents")
-                                    or res.get("items")
-                                    or (res.get("content") if isinstance(res.get("content"), list) else [])
-                                    or []
-                                )
-                            if isinstance(courses, dict):
-                                courses = [courses]
-
-                            mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                            # 파라미터에서 year, term, deptName 추출
-                            req_year = final_args.get("year") or datetime.now().year
-                            raw_term = str(final_args.get("term") or "").upper()
-                            term_map = {"FIRST": "1학기", "SECOND": "2학기", "SUMMER": "여름계절학기", "WINTER": "겨울계절학기"}
-                            req_term_str = term_map.get(raw_term, "2학기" if datetime.now().month >= 7 else "1학기")
-                            dept_hint = f" ({final_args.get('deptName')})" if final_args.get("deptName") else ""
-
-                            lines = [f"\n[인천대학교 개설 강의/수업 조회 결과 - {req_year}년도 {req_term_str}{dept_hint}]:"]
-                            is_empty_course = False
-                            api_err_msg = ""
-                            if isinstance(res, dict) and res.get("error"):
-                                api_err_msg = res.get("error")
-                                if res.get("status_code") == 401:
-                                    api_err_msg = "포털 로그인/인증이 만료되었거나 미인증 상태입니다 (401 Unauthorized)."
-
-                            if api_err_msg:
-                                status_state = "failed"
-                                status_title = f"{tool_display_name} 조회 실패"
-                                lines.append(f"- ⚠️ 교내 시스템 조회 실패: {api_err_msg}")
-                                summary_out = "\n".join(lines) + "\n"
-                            elif not courses and not mcp_summary:
-                                is_empty_course = True
-                            elif mcp_summary and any(kw in mcp_summary for kw in ["없습니다", "찾지 못했습니다", "0건", "없음"]) and not courses:
-                                is_empty_course = True
-
-                            if not api_err_msg and not is_empty_course:
-                                status_state = "completed"
-                                status_title = f"{tool_display_name} 확인 완료"
-                                if courses:
-                                    first_course_id = None
-                                    for c in courses[:6]:
-                                        if isinstance(c, dict):
-                                            c_id = c.get("id")
-                                            if not first_course_id and c_id:
-                                                first_course_id = c_id
-                                            c_name = c.get("courseTitle") or c.get("courseName") or c.get("subject") or c.get("title") or "강의"
-                                            prof = c.get("professor") or c.get("prof") or ""
-                                            room = c.get("timeRoom") or c.get("classroom") or ""
-                                            credit = c.get("credit") or c.get("credits") or ""
-                                            code = c.get("courseCode") or c.get("subjectNumber") or ""
-                                            c_dept = c.get("department") or c.get("departmentName") or c.get("dept") or ""
-                                            details = [f"{req_year}년 {req_term_str}"]
-                                            if c_dept: details.append(f"개설학과: {c_dept}")
-                                            if prof: details.append(f"교수: {prof}")
-                                            if room: details.append(f"강의실/시간: {room}")
-                                            if credit: details.append(f"{credit}학점")
-                                            if code: details.append(f"과목코드: {code}")
-                                            if c_id: details.append(f"강좌ID: {c_id}")
-                                            det_str = f" ({', '.join(details)})" if details else ""
-                                            lines.append(f"- **{c_name}**{det_str}")
-                                    if first_course_id:
-                                        ac_data_out["courseOfferingId"] = first_course_id
-                                        ac_data_out["targetCourseId"] = first_course_id
-                                elif mcp_summary:
-                                    lines.append(mcp_summary)
-                                lines.append("💡 지침: 위 개설 강의 목록을 사용자에게 친절하고 명확하게 안내하세요. 가상의 과목이나 강의실을 지어내지 마세요.")
-                            elif not api_err_msg:
-                                status_state = "empty"
-                                status_title = f"{tool_display_name} 결과 없음"
-                                lines.append("- 조회된 개설 강의가 없습니다.")
-                            summary_out = "\n".join(lines) + "\n"
-                    else:
-                        tool_data = res
-                        mcp_summary = (res.get("summary") or "").strip() if isinstance(res, dict) else ""
-                        if mcp_summary:
-                            if "오류" in mcp_summary or "실패" in mcp_summary:
-                                status_state = "failed"
-                                status_title = f"{tool_display_name} 조회 실패"
-                            elif any(k in mcp_summary for k in ["결과가 없습니다", "조회 결과가 없습니다", "등록된 정보가 없습니다", "내역이 없습니다", "0건"]):
-                                status_state = "empty"
-                                status_title = f"{tool_display_name} 결과 없음"
-                            else:
-                                status_state = "completed"
-                                status_title = f"{tool_display_name} 확인 완료"
-                            summary_out = f"\n[{tool_display_name} 조회 결과 ({tool.name})]:\n{mcp_summary}\n"
-                        else:
-                            summary_out = f"\n[{tool.category} 실시간 조회 데이터 ({tool.name})]:\n{json.dumps(res, ensure_ascii=False)[:1000]}\n"
+                    summary_out, status_state, status_title, ac_data_out, tool_data = (
+                        GenericMcpDataSerializer.serialize_for_llm(
+                            tool_name=tool.name,
+                            tool_category=tool.category,
+                            tool_display_name=tool_display_name,
+                            raw_res=res,
+                            args=final_args,
+                            bus_meta=bus_meta,
+                        )
+                    )
             except Exception as ex:
                 logger.warning(f"Error executing tool {tool.name}: {ex}")
                 status_state = "failed"
-                status_title = f"{tool_display_name} 조회 실패"
+                status_title = f"{tool_display_name} 조회 실패 ({str(ex)})"
                 summary_out = (
                     f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 통신 오류({str(ex)})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
                     f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보를 지어내지 말고, '현재 교내 시스템 일시 오류로 실시간 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"

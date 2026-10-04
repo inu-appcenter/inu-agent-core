@@ -49,6 +49,11 @@ CAMPUS_SYNONYMS: Dict[str, list[str]] = {
     "FASHION": ["패션산업학과", "패션산업", "패디"],
     "LIFE_SCIENCE": ["생명과학부", "생명과학과", "생과"],
     "BIOENGINEERING": ["생명공학부", "생명공학과", "생공"],
+    # Library targets
+    "STUDY_ROOMS": ["STUDY_ROOM", "study_room", "study_rooms", "studyroom", "studyrooms", "스터디룸", "스터디룸목록", "방목록", "스터디", "스터디룸종류"],
+    "SEATS": ["seat", "seats", "SEAT", "열람실", "좌석", "잔여좌석", "열람실좌석", "열람실현황"],
+    "RESERVE_SEAT": ["reserve_seat", "좌석배정", "좌석신청", "좌석배정신청"],
+    "RESERVE_STUDY_ROOM": ["reserve_study_room", "스터디룸예약신청"],
 }
 
 # Korean Department canonical naming for course-offerings
@@ -73,6 +78,28 @@ KOREAN_DEPARTMENTS: Dict[str, list[str]] = {
     "수학과": ["수학"],
     "물리학과": ["물리"],
     "화학과": ["화학"],
+}
+
+# Common Korean course title abbreviations to official catalog names
+COMMON_COURSE_ALIASES: Dict[str, str] = {
+    "모소": "모바일소프트웨어",
+    "웹프": "웹프로그래밍",
+    "자구": "자료구조",
+    "자구실": "자료구조실습",
+    "알고": "알고리즘",
+    "운체": "운영체제",
+    "데베": "데이터베이스",
+    "인공": "인공지능",
+    "컴네": "컴퓨터네트워크",
+    "소공": "소프트웨어공학",
+    "객지": "객체지향프로그래밍",
+    "선대": "선형대수학",
+    "이산": "이산구조",
+    "확통": "확률과통계",
+    "프언": "프로그래밍언어론",
+    "시프": "시스템프로그래밍",
+    "컴구": "컴퓨터구조",
+    "산공": "산업경영공학",
 }
 
 
@@ -113,6 +140,13 @@ class SchemaCoercer:
                     coerced["keyword"] = coerced.pop(alias)
                     break
 
+        # Resolve course abbreviations in search parameters (e.g. 모소 -> 모바일소프트웨어)
+        for param in ["keyword", "courseTitle", "q", "query"]:
+            if param in coerced and coerced[param]:
+                val = str(coerced[param]).strip()
+                if val in COMMON_COURSE_ALIASES:
+                    coerced[param] = COMMON_COURSE_ALIASES[val]
+
         # Academic Year, Term, Month, Day Auto-Defaults (Korean KST timezone)
         kst_now = datetime.now(timezone(timedelta(hours=9)))
         if "year" in properties and (not coerced.get("year")):
@@ -137,9 +171,21 @@ class SchemaCoercer:
             coerced["month"] = kst_now.month
         if "day" in properties and (not coerced.get("day")):
             coerced["day"] = kst_now.weekday() + 1
+        if "cafeteria" in properties and (not coerced.get("cafeteria")):
+            coerced["cafeteria"] = "학생식당"
 
         # Course offerings parameter resilience:
-        # Normalize deptName aliases (e.g. 컴공 -> 컴퓨터공학부, 데사 -> 데이터과학과)
+        # 1) If keyword was erroneously passed as a department alias (e.g. 컴공) and deptName is empty,
+        # promote keyword to deptName and clear keyword so backend doesn't filter courseTitle!
+        if "deptName" in properties and coerced.get("keyword") and not coerced.get("deptName"):
+            raw_kw = str(coerced["keyword"]).strip()
+            for canon_dept, aliases in KOREAN_DEPARTMENTS.items():
+                if raw_kw == canon_dept or raw_kw in aliases:
+                    coerced["deptName"] = canon_dept
+                    coerced.pop("keyword", None)
+                    break
+
+        # 2) Normalize deptName aliases (e.g. 컴공 -> 컴퓨터공학부, 데사 -> 데이터과학과)
         # And extract embedded grade (e.g. '컴퓨터공학부 2학년' -> deptName='컴퓨터공학부', hyNames=['2'])
         if "deptName" in properties and coerced.get("deptName"):
             raw_dept = str(coerced["deptName"]).strip()
@@ -239,6 +285,16 @@ class SchemaCoercer:
                         ci_matched = True
                         break
                 if ci_matched:
+                    continue
+
+                # English Plural / Singular matching (e.g. STUDY_ROOM -> STUDY_ROOMS)
+                upper_val = val_clean.upper()
+                plural_candidate = upper_val + "S"
+                if plural_candidate in p_enum:
+                    coerced[param] = plural_candidate
+                    continue
+                if upper_val.endswith("S") and upper_val[:-1] in p_enum:
+                    coerced[param] = upper_val[:-1]
                     continue
 
                 # Synonym matching

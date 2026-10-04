@@ -41,10 +41,11 @@ class McpRemoteTool(BaseTool):
             },
         }
 
-    async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> Any:
+    async def execute(self, arguments: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Any:
         """
         Execute tool call against remote MCP Server using JSON-RPC 2.0.
         """
+        context = context or {}
         # Dynamically coerce arguments against schema
         sanitized_arguments = SchemaCoercer.coerce(self.input_schema, arguments)
 
@@ -82,6 +83,11 @@ class McpRemoteTool(BaseTool):
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 resp = await client.post(self.mcp_url, json=payload, headers=headers)
+                if resp.status_code == 401 and clean_token:
+                    logger.info(f"MCP remote tool [{self.name}] got 401 with token. Retrying without Auth headers...")
+                    headers_no_auth = {"Content-Type": "application/json", "Accept": "application/json"}
+                    resp = await client.post(self.mcp_url, json=payload, headers=headers_no_auth)
+
                 if resp.status_code >= 400:
                     logger.warning(f"MCP remote call [{self.name}] failed with HTTP {resp.status_code}: {resp.text}")
                     return {"error": f"MCP request failed with status {resp.status_code}"}
@@ -227,10 +233,14 @@ class McpConnector:
                         cat = "LMS"
                     elif "inu_ai" in name_lower or "knowledge" in name_lower:
                         cat = "INU_AI_KNOWLEDGE"
+                    elif "syllabus" in name_lower or "course" in name_lower or "department" in name_lower:
+                        cat = "COURSE"
                     elif "academic" in name_lower:
                         cat = "PORTAL"
                     else:
                         cat = "GENERAL"
+
+
 
                     tool_instance = McpRemoteTool(
                         name=name,

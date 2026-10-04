@@ -109,3 +109,12 @@ def test_schema_coercer_course_offerings_dept_and_grade():
     assert res4["deptName"] == "컴퓨터공학부"
     assert res4["keyword"] == "자료구조"
 
+    # 5. Course abbreviation expansion ('모소' -> '모바일소프트웨어')
+    res5 = SchemaCoercer.coerce(schema, {"keyword": "모소"})
+    assert res5["keyword"] == "모바일소프트웨어"
+
+    # 6. Keyword promotion to deptName when keyword is department alias
+    res6 = SchemaCoercer.coerce(schema, {"keyword": "컴공"})
+    assert res6["deptName"] == "컴퓨터공학부"
+    assert "keyword" not in res6
+

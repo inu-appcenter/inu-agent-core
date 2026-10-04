@@ -106,6 +106,27 @@ class ToolRegistry:
             for preferred in ["api_getDepartmentNotices", "getDepartmentNotices"]:
                 if preferred in self._tools:
                     return self._tools[preferred]
+        elif "syllabus" in clean_name:
+            for preferred in ["api_syllabus", "api_getSyllabus", "syllabus"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "syllabus" in t_name.lower():
+                    return t
+        elif "course" in clean_name:
+            for preferred in ["api_course_offerings", "api_getCourseOfferings", "course_offerings", "api_courses", "getCourseOfferings"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "course" in t_name.lower():
+                    return t
+        elif "timetable" in clean_name:
+            for preferred in ["api_timetable", "api_getTimeTables", "api_getTodayTimeTable", "getTodayTimeTable", "timetable"]:
+                if preferred in self._tools:
+                    return self._tools[preferred]
+            for t_name, t in self._tools.items():
+                if "timetable" in t_name.lower():
+                    return t
 
         # 3. Fallback to category match only if no name matched
         for t_name, t in self._tools.items():
@@ -142,6 +163,7 @@ class ToolRegistry:
         Synchronize tools from inu-portal-server.
         Tries remote MCP (Model Context Protocol /mcp) first, and falls back to OpenAPI /v3/api-docs if unreachable.
         """
+        mcp_count = 0
         # 1. Try modern MCP Server first
         try:
             mcp_connector = McpConnector()
@@ -149,32 +171,36 @@ class ToolRegistry:
             if mcp_tools:
                 for tool in mcp_tools:
                     self.register(tool)
-                logger.info(f"Successfully mounted {len(mcp_tools)} tools from INU Portal MCP server")
-                return len(mcp_tools)
+                mcp_count = len(mcp_tools)
+                logger.info(f"Successfully mounted {mcp_count} tools from INU Portal MCP server")
         except Exception as e:
             logger.warning(f"Failed to sync tools via MCP: {e}. Falling back to OpenAPI...")
 
-        # 2. Fallback to OpenAPI Connector
+        # 2. Sync OpenAPI Connector (supplementing any tools not yet in MCP, e.g. course offerings)
         connector = OpenApiConnector()
         spec = await connector.fetch_spec()
 
         if not spec:
-            logger.warning("inu-portal-server is offline or unreachable. Loading fallback sample schema...")
             sample_path = Path(__file__).parent / "schemas" / "inu_portal_sample.json"
             if sample_path.exists():
                 with open(sample_path, "r", encoding="utf-8") as f:
                     spec = json.load(f)
 
         if not spec:
-            logger.error("No OpenAPI spec available to sync.")
-            return 0
+            if mcp_count == 0:
+                logger.error("No OpenAPI spec or MCP tools available to sync.")
+            return mcp_count
 
         parsed_tools = connector.parse_spec(spec)
+        openapi_count = 0
         for tool in parsed_tools:
-            self.register(tool)
+            # If not already registered via MCP, register from OpenAPI
+            if tool.name not in self._tools:
+                self.register(tool)
+                openapi_count += 1
 
-        logger.info(f"Successfully synced {len(parsed_tools)} tools from INU Portal OpenAPI spec")
-        return len(parsed_tools)
+        logger.info(f"Successfully synced {openapi_count} supplemental tools from INU Portal OpenAPI spec (MCP: {mcp_count})")
+        return mcp_count + openapi_count
 
     async def initialize_all_tools(self) -> None:
         """Initialize internal OpenAPI tools, INUChat RAG knowledge tool, Library real-time tool, Campus Watch tool, and external Client Action tools."""
