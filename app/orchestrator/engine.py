@@ -324,6 +324,32 @@ class AgentOrchestrator:
                                 "arguments": {"courseOfferingId": int(target_cid)},
                             }
                         }]
+                elif any(kw in request.message for kw in ["개설과목", "개설 과목", "개설강의", "수업 뭐", "강의 뭐", "열렸어", "열려", "과목 목록"]) and "api_getCourseOfferings" not in executed_tool_names:
+                    course_tool = tool_registry.get_tool("api_getCourseOfferings") or tool_registry.get_tool("api_course_offerings")
+                    if course_tool:
+                        from app.tools.coercer import KOREAN_DEPARTMENTS
+                        dept_candidate = None
+                        for canon, aliases in KOREAN_DEPARTMENTS.items():
+                            if any(a in request.message for a in [canon] + aliases):
+                                dept_candidate = canon
+                                break
+                        args_to_chain = {}
+                        if dept_candidate:
+                            args_to_chain["deptName"] = dept_candidate
+                        logger.info(f"Deterministic Multi-Hop: Chaining to {course_tool.name} for course offerings query with args={args_to_chain}")
+                        yield AgentStreamEvent(
+                            event_type="THINKING",
+                            thinking=f"사용자가 문의한 개설 과목/수업 목록을 조회하기 위해 {course_tool.name}을 호출합니다.",
+                        )
+                        from uuid import uuid4
+                        tool_calls = [{
+                            "id": f"call_auto_course_{uuid4().hex[:6]}",
+                            "type": "function",
+                            "function": {
+                                "name": course_tool.name,
+                                "arguments": args_to_chain,
+                            }
+                        }]
                 elif "SEARCH" in failed_tool_categories and "NOTICE" not in executed_categories and "api_notice" not in executed_tool_names:
                     search_query = failed_tool_categories.get("SEARCH") or request.message
                     logger.info(f"Deterministic Multi-Hop: Chaining from failed SEARCH to api_notice for query '{search_query}'")
