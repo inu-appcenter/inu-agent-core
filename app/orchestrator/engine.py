@@ -1828,7 +1828,6 @@ class AgentOrchestrator:
                             courses = s_data.get("courses", {}).get("items", []) if isinstance(s_data.get("courses"), dict) else []
                             if courses:
                                 # 현재 시점 기준 학기 표기 보강 (통합검색 강의 목록의 연도/학기 식별력 제고)
-                                from datetime import datetime, timezone, timedelta
                                 kst_dt = datetime.now(timezone(timedelta(hours=9)))
                                 cur_term_str = "1학기" if 3 <= kst_dt.month <= 8 else "2학기"
                                 cur_year = kst_dt.year if kst_dt.month >= 3 else kst_dt.year - 1
