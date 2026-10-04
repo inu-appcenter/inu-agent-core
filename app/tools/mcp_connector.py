@@ -228,10 +228,14 @@ class McpConnector:
                         cat = "LMS"
                     elif "inu_ai" in name_lower or "knowledge" in name_lower:
                         cat = "INU_AI_KNOWLEDGE"
+                    elif "syllabus" in name_lower or "course" in name_lower or "department" in name_lower:
+                        cat = "COURSE"
                     elif "academic" in name_lower:
                         cat = "PORTAL"
                     else:
                         cat = "GENERAL"
+
+
 
                     tool_instance = McpRemoteTool(
                         name=name,
