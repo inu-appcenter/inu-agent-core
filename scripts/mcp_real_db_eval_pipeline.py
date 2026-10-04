@@ -202,12 +202,13 @@ SCENARIOS: List[EvalScenario] = [
     EvalScenario(
         id="TC13_DIR_SCHOLARSHIP_OFFICE",
         category="연락처/위치",
-        name="학생지원과/장학팀 연락처",
-        query="장학금 물어보려는데 장학팀 전화번호 뭐야?",
+        name="학생지원과 연락처 조회",
+        query="장학금이나 학생 복지 담당하는 학생지원과 전화번호 알려줘",
         expected_tool_categories=["DIRECTORY", "SEARCH"],
-        expected_ground_truth_keywords=["032-835"],
-        notes="교내 장학 담당 부서 연락처 확인",
+        expected_ground_truth_keywords=["032-835", "학생지원과"],
+        notes="교내 장학/학생지원 담당 부서(학생지원과: 032-835-9261) 연락처 확인",
     ),
+
 
     # =========================================================================
     # Group 5: 학산도서관 좌석 및 열람실 (Library)
