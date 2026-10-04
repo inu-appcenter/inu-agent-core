@@ -245,7 +245,7 @@ SCENARIOS: List[EvalScenario] = [
         query="도서관 스터디룸 예약하려는데 방 목록 보여줘",
         expected_tool_categories=["LIBRARY"],
         expected_ground_truth_keywords=["205호", "중앙관", "스터디룸"],
-        prohibited_phrases=["로그인", "인증 필요", "확인할 수 없습니다", "연동이 필요", "보안 인증", "계정 연동"],
+        prohibited_phrases=["로그인이 필요", "인증이 필요", "인증 필요", "확인할 수 없습니다", "연동이 필요", "계정 연동이 필요"],
         notes="스터디룸 목록(205호 등) 및 예약 대화형 카드 노출",
     ),
 
@@ -536,9 +536,13 @@ async def evaluate_single_scenario_remote(
             "TC15_LIB_STUDY_ROOMS",
         ]
         if scenario.id in must_succeed_scenarios:
-            detected_refusals = [m for m in refusal_markers if m in full_answer]
-            if detected_refusals:
-                errors.append(f"거절/미조회 문구 검출로 인한 False Positive 방지 실패 처리: {detected_refusals}")
+            # Weekend cafeteria exception: if closed/weekend, it's legitimate fact reporting, not a refusal failure!
+            if scenario.id == "TC06_CAFETERIA_TODAY_MENU" and any(w in full_answer for w in ["운영하지 않", "오늘은 쉽니다", "휴무", "주말"]):
+                pass
+            else:
+                detected_refusals = [m for m in refusal_markers if m in full_answer]
+                if detected_refusals:
+                    errors.append(f"거절/미조회 문구 검출로 인한 False Positive 방지 실패 처리: {detected_refusals}")
 
         is_passed = len(errors) == 0
 

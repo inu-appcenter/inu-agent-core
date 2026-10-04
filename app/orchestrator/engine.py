@@ -336,6 +336,16 @@ class AgentOrchestrator:
                         args_to_chain = {}
                         if dept_candidate:
                             args_to_chain["deptName"] = dept_candidate
+                        
+                        prof_m = re.search(r"([가-힣]{2,4})\s*(?:교수님|교수|선생님)", request.message)
+                        if prof_m:
+                            args_to_chain["keyword"] = prof_m.group(1)
+                        else:
+                            from app.tools.coercer import COMMON_COURSE_ALIASES
+                            for alias, canon_title in COMMON_COURSE_ALIASES.items():
+                                if alias in request.message:
+                                    args_to_chain["keyword"] = canon_title
+                                    break
                         logger.info(f"Deterministic Multi-Hop: Chaining to {course_tool.name} for course offerings query with args={args_to_chain}")
                         yield AgentStreamEvent(
                             event_type="THINKING",
