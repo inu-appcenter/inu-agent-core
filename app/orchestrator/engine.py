@@ -1366,7 +1366,7 @@ class AgentOrchestrator:
                                 emitted_cards.add("TIMETABLE")
                     else:
                         status_state = "failed"
-                        status_title = f"{tool_display_name} 조회 실패"
+                        status_title = f"{tool_display_name} 조회 실패 ({err_msg})"
                         summary_out = (
                             f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 서버 응답 지연 또는 오류({err_msg})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
                             f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보(식단 메뉴, 버스 도착 시간, 전화번호, 시간표 등)를 지어내지 말고, "
@@ -1389,7 +1389,7 @@ class AgentOrchestrator:
             except Exception as ex:
                 logger.warning(f"Error executing tool {tool.name}: {ex}")
                 status_state = "failed"
-                status_title = f"{tool_display_name} 조회 실패"
+                status_title = f"{tool_display_name} 조회 실패 ({str(ex)})"
                 summary_out = (
                     f"\n[시스템 오류 고지]: {tool_display_name} 조회 중 일시적인 교내 통신 오류({str(ex)})가 발생하여 실시간 정보를 가져오지 못했습니다.\n"
                     f"⚠️ 핵심 응답 지침: 절대로 임의의 가상 정보를 지어내지 말고, '현재 교내 시스템 일시 오류로 실시간 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요'라고 사실대로 사용자에게 안내하세요.\n"
