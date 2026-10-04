@@ -49,6 +49,11 @@ CAMPUS_SYNONYMS: Dict[str, list[str]] = {
     "FASHION": ["패션산업학과", "패션산업", "패디"],
     "LIFE_SCIENCE": ["생명과학부", "생명과학과", "생과"],
     "BIOENGINEERING": ["생명공학부", "생명공학과", "생공"],
+    # Library targets
+    "STUDY_ROOMS": ["STUDY_ROOM", "study_room", "study_rooms", "studyroom", "studyrooms", "스터디룸", "스터디룸목록", "방목록", "스터디", "스터디룸종류"],
+    "SEATS": ["seat", "seats", "SEAT", "열람실", "좌석", "잔여좌석", "열람실좌석", "열람실현황"],
+    "RESERVE_SEAT": ["reserve_seat", "좌석배정", "좌석신청", "좌석배정신청"],
+    "RESERVE_STUDY_ROOM": ["reserve_study_room", "스터디룸예약신청"],
 }
 
 # Korean Department canonical naming for course-offerings
@@ -280,6 +285,16 @@ class SchemaCoercer:
                         ci_matched = True
                         break
                 if ci_matched:
+                    continue
+
+                # English Plural / Singular matching (e.g. STUDY_ROOM -> STUDY_ROOMS)
+                upper_val = val_clean.upper()
+                plural_candidate = upper_val + "S"
+                if plural_candidate in p_enum:
+                    coerced[param] = plural_candidate
+                    continue
+                if upper_val.endswith("S") and upper_val[:-1] in p_enum:
+                    coerced[param] = upper_val[:-1]
                     continue
 
                 # Synonym matching

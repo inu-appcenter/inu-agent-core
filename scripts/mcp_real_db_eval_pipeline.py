@@ -244,8 +244,8 @@ SCENARIOS: List[EvalScenario] = [
         name="도서관 스터디룸 목록 및 시설",
         query="도서관 스터디룸 예약하려는데 방 목록 보여줘",
         expected_tool_categories=["LIBRARY"],
-        expected_ground_truth_keywords=["스터디룸", "호"],
-        prohibited_phrases=["로그인", "인증 필요", "확인할 수 없습니다"],
+        expected_ground_truth_keywords=["205호", "중앙관", "스터디룸"],
+        prohibited_phrases=["로그인", "인증 필요", "확인할 수 없습니다", "연동이 필요", "보안 인증", "계정 연동"],
         notes="스터디룸 목록(205호 등) 및 예약 대화형 카드 노출",
     ),
 
@@ -570,9 +570,17 @@ async def main():
     parser = argparse.ArgumentParser(description="Large-Scale Real-Student MCP Evaluation Pipeline")
     parser.add_argument("--url", default=DEFAULT_REMOTE_URL, help="Remote server endpoint URL")
     parser.add_argument("--concurrency", type=int, default=3, help="Concurrent request limit")
+    parser.add_argument("--id", type=str, default=None, help="Filter by scenario ID (e.g. TC15_LIB_STUDY_ROOMS)")
     args = parser.parse_args()
 
-    total = len(SCENARIOS)
+    scenarios_to_run = SCENARIOS
+    if args.id:
+        scenarios_to_run = [s for s in SCENARIOS if args.id.lower() in s.id.lower()]
+        if not scenarios_to_run:
+            print(f"❌ No scenarios found matching ID: {args.id}")
+            sys.exit(1)
+
+    total = len(scenarios_to_run)
     print("=" * 80)
     print(f"🎓 인천대학교 전 도메인 학생 실생활 32종 대규모 실서버 E2E 검증 파이프라인 가동")
     print(f"🌐 검증 대상 엔드포인트: {args.url}")
@@ -593,7 +601,7 @@ async def main():
                     print(f"[{idx:02d}/{total:02d}] ❌ FAIL: [{sc.category}] {sc.name} -> {res['errors']}")
                 return res
 
-        tasks = [run_with_sem(sc, i) for i, sc in enumerate(SCENARIOS, 1)]
+        tasks = [run_with_sem(sc, i) for i, sc in enumerate(scenarios_to_run, 1)]
         results = await asyncio.gather(*tasks)
 
     passed_count = sum(1 for r in results if r["passed"])
