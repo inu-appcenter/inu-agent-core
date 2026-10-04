@@ -2067,9 +2067,15 @@ class AgentOrchestrator:
                                             room = c.get("timeRoom") or c.get("classroom") or ""
                                             credit = c.get("credit") or c.get("credits") or ""
                                             code = c.get("courseCode") or c.get("subjectNumber") or ""
-                                            c_dept = c.get("department") or c.get("departmentName") or c.get("dept") or ""
+                                            c_dept = c.get("department") or c.get("departmentName") or c.get("dept") or c.get("deptName") or ""
+                                            hy = c.get("hyName") or c.get("hyCode")
+                                            isu = c.get("isuName") or c.get("isuFldName")
+                                            grade_eval = c.get("gradeEvaluationName") or c.get("gradeEvaluationCode")
                                             details = [f"{req_year}년 {req_term_str}"]
                                             if c_dept: details.append(f"개설학과: {c_dept}")
+                                            if hy: details.append(f"대상학년: {hy}학년")
+                                            if isu: details.append(f"이수구분: {isu}")
+                                            if grade_eval: details.append(f"성적평가방식: {grade_eval}")
                                             if prof: details.append(f"교수: {prof}")
                                             if room: details.append(f"강의실/시간: {room}")
                                             if credit: details.append(f"{credit}학점")
