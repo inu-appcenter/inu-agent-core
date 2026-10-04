@@ -40,10 +40,14 @@ def is_out_of_scope_question(msg: str) -> bool:
     ]
     if any(k in lower for k in coding_keywords):
         is_academic_context = any(
-            k in lower for k in ["수강", "과목", "학점", "전공", "교수", "강의", "신청", "성적", "개설"]
+            k in lower for k in [
+                "수강", "과목", "학점", "전공", "교수", "강의", "신청", "성적", "개설",
+                "동아리", "학회", "소모임", "연구실", "랩실", "공모전", "대회", "센터", "학과", "학부"
+            ]
         )
         if not is_academic_context:
             return True
+
 
     # 2. 순수 수학/과학 문제 풀이 질의
     math_keywords = ["풀어줘", "계산해줘", "방정식", "미분", "적분"]

@@ -137,6 +137,9 @@ class SchemaCoercer:
             coerced["month"] = kst_now.month
         if "day" in properties and (not coerced.get("day")):
             coerced["day"] = kst_now.weekday() + 1
+        if "cafeteria" in properties and (not coerced.get("cafeteria")):
+            coerced["cafeteria"] = "학생식당"
+
 
         # Course offerings parameter resilience:
         # Normalize deptName aliases (e.g. 컴공 -> 컴퓨터공학부, 데사 -> 데이터과학과)
