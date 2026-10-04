@@ -89,7 +89,6 @@ class OpenApiTool(BaseTool):
             headers["Auth"] = clean_token
             headers["Authorization"] = f"Bearer {clean_token}"
 
-
         if settings.INU_INTERNAL_S2S_SECRET:
             headers["X-Internal-Secret"] = settings.INU_INTERNAL_S2S_SECRET
 
@@ -103,6 +102,19 @@ class OpenApiTool(BaseTool):
                     response = await client.post(full_url, json=query_params, headers=headers)
                 else:
                     response = await client.request(self.method, full_url, params=query_params, headers=headers)
+
+                # Fallback: if 401 with token, retry once without auth headers
+                if response.status_code == 401 and clean_token:
+                    logger.info(f"OpenApiTool [{self.name}] got 401 with token. Retrying without Auth headers...")
+                    headers_no_auth = dict(headers)
+                    headers_no_auth.pop("Auth", None)
+                    headers_no_auth.pop("Authorization", None)
+                    if self.method == "GET":
+                        response = await client.get(full_url, params=query_params, headers=headers_no_auth)
+                    elif self.method == "POST":
+                        response = await client.post(full_url, json=query_params, headers=headers_no_auth)
+                    else:
+                        response = await client.request(self.method, full_url, params=query_params, headers=headers_no_auth)
 
                 if response.status_code >= 400:
                     logger.warning(f"OpenApiTool [{self.name}] failed with status {response.status_code}: {response.text}")

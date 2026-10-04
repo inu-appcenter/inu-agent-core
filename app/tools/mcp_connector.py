@@ -83,6 +83,11 @@ class McpRemoteTool(BaseTool):
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 resp = await client.post(self.mcp_url, json=payload, headers=headers)
+                if resp.status_code == 401 and clean_token:
+                    logger.info(f"MCP remote tool [{self.name}] got 401 with token. Retrying without Auth headers...")
+                    headers_no_auth = {"Content-Type": "application/json", "Accept": "application/json"}
+                    resp = await client.post(self.mcp_url, json=payload, headers=headers_no_auth)
+
                 if resp.status_code >= 400:
                     logger.warning(f"MCP remote call [{self.name}] failed with HTTP {resp.status_code}: {resp.text}")
                     return {"error": f"MCP request failed with status {resp.status_code}"}
