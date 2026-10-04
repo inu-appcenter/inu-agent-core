@@ -1302,7 +1302,12 @@ class AgentOrchestrator:
                 }
 
             # Schema-driven dynamic parameter coercion (Generic MCP standard)
-            schema_params = getattr(tool, "input_schema", None) or {}
+            schema_params = (
+                getattr(tool, "input_schema", None)
+                or getattr(tool, "parameters_schema", None)
+                or (tool.get_schema().get("function", {}).get("parameters") if hasattr(tool, "get_schema") else {})
+                or {}
+            )
             final_args = SchemaCoercer.coerce(schema_params, final_args)
 
             status_state = "completed"

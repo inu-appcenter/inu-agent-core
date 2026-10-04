@@ -33,6 +33,11 @@ class OpenApiTool(BaseTool):
         self.category = category
         self.requires_auth = requires_auth
 
+    @property
+    def input_schema(self) -> Dict[str, Any]:
+        """Provides uniform MCP-compatible schema property access."""
+        return self.parameters_schema
+
     def get_schema(self) -> Dict[str, Any]:
         return {
             "type": "function",
