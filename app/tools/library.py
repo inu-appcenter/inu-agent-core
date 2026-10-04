@@ -135,7 +135,9 @@ class LibrarySeatTool(BaseTool):
             }
 
         # 2. 스터디룸 예약 신청 (RESERVE_STUDY_ROOM)
-        if target == "RESERVE_STUDY_ROOM":
+        # 구체적인 스터디룸 명칭이나 예약 일시가 있고, 단순 목록 조회가 아닌 경우에만 예약 확인 카드로 진입
+        is_catalog_query = any(kw in query for kw in ["목록", "종류", "어떤 방", "보여줘", "리스트", "몇개"])
+        if target == "RESERVE_STUDY_ROOM" and (room_name or arguments.get("date")) and not is_catalog_query:
             study_data = {
                 "roomName": room_name or "205호 스터디룸",
                 "roomId": room_id or 9,

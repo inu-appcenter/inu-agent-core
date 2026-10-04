@@ -65,7 +65,7 @@ class EvalScenario:
         self.query = query
         self.expected_tool_categories = expected_tool_categories
         self.expected_ground_truth_keywords = expected_ground_truth_keywords
-        self.prohibited_phrases = prohibited_phrases or [
+        self.prohibited_phrases = prohibited_phrases if prohibited_phrases is not None else [
             "기능을 지원하지 않습니다",
             "직접 조회하여 안내해 드리는 기능을 지원하지 않습니다",
             "제공하지 않는 기능입니다",
@@ -85,7 +85,15 @@ SCENARIOS: List[EvalScenario] = [
         query="모소 수업 상대평가임 절대평가임?",
         expected_tool_categories=["COURSE"],
         expected_ground_truth_keywords=["상대평가"],
-        notes="학생 줄임말 '모소'와 '상대평가임 절대평가임' 인식 및 상대평가 확인",
+        prohibited_phrases=[
+            "확인할 수 없습니다",
+            "조회되지 않습니다",
+            "지원하지 않습니다",
+            "제공하지 않습니다",
+            "정보를 찾을 수 없습니다",
+            "절대평가로 진행",
+        ],
+        notes="학생 줄임말 '모소'와 '상대평가임 절대평가임' 인식 및 실제 상대평가 데이터 확인",
     ),
     EvalScenario(
         id="TC02_COURSE_CREDIT_GRADE",
@@ -94,6 +102,7 @@ SCENARIOS: List[EvalScenario] = [
         query="모바일소프트웨어 강의 몇 학점짜리 수업이야?",
         expected_tool_categories=["COURSE"],
         expected_ground_truth_keywords=["3학점"],
+        prohibited_phrases=["확인할 수 없습니다", "조회되지 않습니다", "지원하지 않습니다"],
         notes="credit: 3 확인",
     ),
     EvalScenario(
@@ -103,6 +112,12 @@ SCENARIOS: List[EvalScenario] = [
         query="이번 학기 컴공 개설과목 뭐뭐 열렸어?",
         expected_tool_categories=["COURSE"],
         expected_ground_truth_keywords=["컴퓨터공학부"],
+        prohibited_phrases=[
+            "확인할 수 없습니다",
+            "개설과목을 찾을 수 없습니다",
+            "조회되지 않습니다",
+            "결과가 없습니다",
+        ],
         notes="컴공 -> 컴퓨터공학부 매핑 및 개설강의 목록 확인",
     ),
     EvalScenario(
@@ -196,8 +211,9 @@ SCENARIOS: List[EvalScenario] = [
         name="교수님 연구실 위치 및 연락처",
         query="홍윤식 교수님 연구실 어디야?",
         expected_tool_categories=["DIRECTORY", "SEARCH"],
-        expected_ground_truth_keywords=["홍윤식"],
-        notes="교수 정보 검색 및 안내",
+        expected_ground_truth_keywords=["홍윤식", "컴퓨터공학부"],
+        prohibited_phrases=["교내 시스템 일시 오류"],
+        notes="교수 정보 검색 및 소속 안내 (실제 DB에 연구실 호수 미등록 사실 안내)",
     ),
     EvalScenario(
         id="TC13_DIR_SCHOLARSHIP_OFFICE",
@@ -228,8 +244,9 @@ SCENARIOS: List[EvalScenario] = [
         name="도서관 스터디룸 목록 및 시설",
         query="도서관 스터디룸 예약하려는데 방 목록 보여줘",
         expected_tool_categories=["LIBRARY"],
-        expected_ground_truth_keywords=["스터디룸"],
-        notes="스터디룸 리스트 및 예약 안내",
+        expected_ground_truth_keywords=["스터디룸", "호"],
+        prohibited_phrases=["로그인", "인증 필요", "확인할 수 없습니다"],
+        notes="스터디룸 목록(205호 등) 및 예약 대화형 카드 노출",
     ),
 
     # =========================================================================
@@ -315,18 +332,20 @@ SCENARIOS: List[EvalScenario] = [
         category="동아리",
         name="중앙동아리 목록 조회",
         query="학교에 동아리 뭐뭐 있어?",
-        expected_tool_categories=["CLUB", "SEARCH"],
+        expected_tool_categories=["CLUB", "NOTICE", "SEARCH"],
         expected_ground_truth_keywords=["동아리"],
-        notes="교내 동아리 시스템 조회 및 학과별 공지 안내",
+        prohibited_phrases=["교내 시스템 일시 오류"],
+        notes="교내 동아리 시스템 조회 및 학과별 공지 안내 (dev DB 0건 처리 검증)",
     ),
     EvalScenario(
         id="TC24_CLUB_CODING",
         category="동아리",
         name="코딩 / 학술 관련 동아리 조회",
         query="코딩이나 컴퓨터 관련된 동아리 있어?",
-        expected_tool_categories=["CLUB", "SEARCH"],
+        expected_tool_categories=["CLUB", "NOTICE", "SEARCH"],
         expected_ground_truth_keywords=["동아리"],
-        notes="학술/코딩 동아리 안내",
+        prohibited_phrases=["교내 시스템 일시 오류"],
+        notes="학술/코딩 동아리 검색 또는 관련 공지 안내",
     ),
 
     # =========================================================================
@@ -493,6 +512,33 @@ async def evaluate_single_scenario_remote(
         matched_kws = [kw for kw in scenario.expected_ground_truth_keywords if kw in full_answer]
         if not matched_kws:
             errors.append(f"필수 정답 키워드 누락 (기대: {scenario.expected_ground_truth_keywords})")
+
+        # 4. Anti-Echo False Positive Guard:
+        # Prevent false passes where AI repeats question terms but answers with refusal/failure
+        refusal_markers = [
+            "확인할 수 없습니다",
+            "조회되지 않습니다",
+            "조회할 수 없습니다",
+            "찾을 수 없습니다",
+            "정보가 없습니다",
+            "지원하지 않습니다",
+            "제공하지 않습니다",
+            "등록되어 있지 않습니다",
+        ]
+        # Scenarios where real data is guaranteed to exist and refusals are unacceptable
+        must_succeed_scenarios = [
+            "TC01_COURSE_EVAL_TYPE",
+            "TC02_COURSE_CREDIT_GRADE",
+            "TC03_COURSE_DEPT_CSE",
+            "TC06_CAFETERIA_TODAY_MENU",
+            "TC11_DIR_CSE_OFFICE",
+            "TC13_DIR_SCHOLARSHIP_OFFICE",
+            "TC15_LIB_STUDY_ROOMS",
+        ]
+        if scenario.id in must_succeed_scenarios:
+            detected_refusals = [m for m in refusal_markers if m in full_answer]
+            if detected_refusals:
+                errors.append(f"거절/미조회 문구 검출로 인한 False Positive 방지 실패 처리: {detected_refusals}")
 
         is_passed = len(errors) == 0
 
