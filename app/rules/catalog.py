@@ -225,6 +225,30 @@ DEFAULT_ACTION_RULES: Dict[str, ActionRule] = {
         ),
         default_card_type="METRIC_CARD",
     ),
+    "PORTAL_GET_DORMITORY_STUDENT_INFO": ActionRule(
+        action_id="PORTAL_GET_DORMITORY_STUDENT_INFO",
+        domain="PORTAL",
+        protocol="NEXACRO_SSV",
+        action_type="QUERY",
+        title="생활원 사생 정보 및 기숙사 배정 내역 조회",
+        description="포털 종합정보시스템(ERP 부속행정 생활원 사생정보조회 화면)에서 사생 배정 호실, 침대 번호, 룸 타입, 입퇴사일, 상벌점 내역 및 식수 신청 현황을 조회합니다.",
+        version="1.0.0",
+        target=RuleTarget(
+            url="/aff/dmty/DmsdCtr/findDmsdInfoOne.do",
+            method="POST",
+            params={"menuId": "M004010", "pgmId": "P003180"},
+            headers={"REQFOUNDATAION": "nexacro", "Content-Type": "text/plain; charset=UTF-8"},
+            body_template={
+                "dataset": "DS_COND",
+                "columns": ["stuno", "yy", "tmGbn"],
+            },
+        ),
+        privacy=PrivacyPolicy(
+            mask_fields=["studentNumber"],
+            retention="TRANSIENT",
+        ),
+        default_card_type="METRIC_CARD",
+    ),
     "DORM_APPLY_SLEEPOVER": ActionRule(
         action_id="DORM_APPLY_SLEEPOVER",
         domain="DORM",
